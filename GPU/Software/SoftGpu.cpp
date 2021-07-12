@@ -21,12 +21,12 @@
 #include "GPU/GPUState.h"
 #include "GPU/ge_constants.h"
 #include "GPU/Common/TextureDecoder.h"
-#include "Common/ColorConv.h"
+#include "Common/Data/Convert/ColorConv.h"
 #include "Common/GraphicsContext.h"
 #include "Core/Config.h"
 #include "Core/ConfigValues.h"
 #include "Core/Core.h"
-#include "Core/Debugger/Breakpoints.h"
+#include "Core/Debugger/MemBlockInfo.h"
 #include "Core/MemMap.h"
 #include "Core/HLE/sceKernelInterrupt.h"
 #include "Core/HLE/sceGe.h"
@@ -68,25 +68,12 @@ SoftGPU::SoftGPU(GraphicsContext *gfxCtx, Draw::DrawContext *draw)
 
 	Sampler::Init();
 	drawEngine_ = new SoftwareDrawEngine();
+	drawEngine_->Init();
 	drawEngineCommon_ = drawEngine_;
 
 	if (gfxCtx && draw) {
 		presentation_ = new PresentationCommon(draw_);
-
-		switch (GetGPUBackend()) {
-		case GPUBackend::OPENGL:
-			presentation_->SetLanguage(draw_->GetShaderLanguageDesc().shaderLanguage);
-			break;
-		case GPUBackend::DIRECT3D9:
-			presentation_->SetLanguage(HLSL_D3D9);
-			break;
-		case GPUBackend::DIRECT3D11:
-			presentation_->SetLanguage(HLSL_D3D11);
-			break;
-		case GPUBackend::VULKAN:
-			presentation_->SetLanguage(GLSL_VULKAN);
-			break;
-		}
+		presentation_->SetLanguage(draw_->GetShaderLanguageDesc().shaderLanguage);
 	}
 	Resized();
 }
@@ -653,8 +640,11 @@ void SoftGPU::ExecuteOp(u32 op, u32 diff) {
 				memcpy(dst, src, width * bpp);
 			}
 
-			CBreakPoints::ExecMemCheck(srcBasePtr + (srcY * srcStride + srcX) * bpp, false, height * srcStride * bpp, currentMIPS->pc);
-			CBreakPoints::ExecMemCheck(dstBasePtr + (srcY * dstStride + srcX) * bpp, true, height * dstStride * bpp, currentMIPS->pc);
+			const uint32_t src = srcBasePtr + (srcY * srcStride + srcX) * bpp;
+			const uint32_t srcSize = height * srcStride * bpp;
+			const std::string tag = "GPUBlockTransfer/" + GetMemWriteTagAt(src, srcSize);
+			NotifyMemInfo(MemBlockFlags::READ, src, srcSize, tag.c_str(), tag.size());
+			NotifyMemInfo(MemBlockFlags::WRITE, dstBasePtr + (dstY * dstStride + dstX) * bpp, height * dstStride * bpp, tag.c_str(), tag.size());
 
 			// TODO: Correct timing appears to be 1.9, but erring a bit low since some of our other timing is inaccurate.
 			cyclesExecuted += ((height * width * bpp) * 16) / 10;

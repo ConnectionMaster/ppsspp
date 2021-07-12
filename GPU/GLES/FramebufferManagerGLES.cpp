@@ -17,12 +17,12 @@
 
 #include <algorithm>
 
+#include "Common/Data/Convert/ColorConv.h"
 #include "Common/Profiler/Profiler.h"
 #include "Common/GPU/OpenGL/GLCommon.h"
 #include "Common/GPU/OpenGL/GLDebugLog.h"
 #include "Common/GPU/OpenGL/GLSLProgram.h"
 #include "Common/GPU/thin3d.h"
-#include "Common/ColorConv.h"
 #include "Core/MemMap.h"
 #include "Core/Config.h"
 #include "Core/ConfigValues.h"
@@ -103,9 +103,8 @@ FramebufferManagerGLES::FramebufferManagerGLES(Draw::DrawContext *draw, GLRender
 {
 	needBackBufferYSwap_ = true;
 	needGLESRebinds_ = true;
-	CreateDeviceObjects();
-	render_ = (GLRenderManager *)draw_->GetNativeObject(Draw::NativeObject::RENDER_MANAGER);
 	presentation_->SetLanguage(draw_->GetShaderLanguageDesc().shaderLanguage);
+	CreateDeviceObjects();
 }
 
 void FramebufferManagerGLES::Init() {
@@ -173,8 +172,6 @@ void FramebufferManagerGLES::DrawActiveTexture(float x, float y, float w, float 
 		u0,v1,
 	};
 
-	static const GLushort indices[4] = { 0,1,3,2 };
-
 	if (uvRotation != ROTATION_LOCKED_HORIZONTAL) {
 		float temp[8];
 		int rotation = 0;
@@ -206,7 +203,7 @@ void FramebufferManagerGLES::DrawActiveTexture(float x, float y, float w, float 
 
 	// We always want a plain state here, well, except for when it's used by the stencil stuff...
 	render_->SetDepth(false, false, GL_ALWAYS);
-	render_->SetRaster(false, GL_CCW, GL_FRONT, GL_FALSE);
+	render_->SetRaster(false, GL_CCW, GL_FRONT, GL_FALSE, GL_FALSE);
 	if (!(flags & DRAWTEX_KEEP_STENCIL_ALPHA)) {
 		render_->SetNoBlendAndMask(0xF);
 		render_->SetStencilDisabled();
@@ -344,8 +341,8 @@ void FramebufferManagerGLES::DeviceLost() {
 
 void FramebufferManagerGLES::DeviceRestore(Draw::DrawContext *draw) {
 	FramebufferManagerCommon::DeviceRestore(draw);
-	CreateDeviceObjects();
 	render_ = (GLRenderManager *)draw_->GetNativeObject(Draw::NativeObject::RENDER_MANAGER);
+	CreateDeviceObjects();
 }
 
 void FramebufferManagerGLES::Resized() {

@@ -1,3 +1,4 @@
+#include "ppsspp_config.h"
 #include "Common/System/Display.h"
 #include "Common/GPU/thin3d.h"
 #include "Common/Data/Hash/Hash.h"
@@ -357,6 +358,11 @@ void TextDrawerUWP::DrawStringBitmap(std::vector<uint8_t> &bitmapData, TextStrin
 
 	size.cx = metrics.width + 1;
 	size.cy = metrics.height + 1;
+
+	if (size.cx > MAX_TEXT_WIDTH)
+		size.cx = MAX_TEXT_WIDTH;
+	if (size.cy > MAX_TEXT_HEIGHT)
+		size.cy = MAX_TEXT_HEIGHT;
 
 	// Prevent zero-sized textures, which can occur. Not worth to avoid
 	// creating the texture altogether in this case. One example is a string

@@ -19,12 +19,12 @@
 #include <cstring>
 
 #include "ext/xxhash.h"
+#include "Common/Data/Convert/ColorConv.h"
 #include "Common/Data/Text/I18n.h"
 #include "Common/Math/math_util.h"
 #include "Common/Profiler/Profiler.h"
 #include "Common/GPU/OpenGL/GLRenderManager.h"
 
-#include "Common/ColorConv.h"
 #include "Core/Config.h"
 #include "Core/Host.h"
 #include "Core/MemMap.h"
@@ -45,7 +45,6 @@
 
 TextureCacheGLES::TextureCacheGLES(Draw::DrawContext *draw)
 	: TextureCacheCommon(draw) {
-	timesInvalidatedAllThisFrame_ = 0;
 	render_ = (GLRenderManager *)draw_->GetNativeObject(Draw::NativeObject::RENDER_MANAGER);
 
 	SetupTextureDecoder();
@@ -229,7 +228,7 @@ void TextureCacheGLES::BindTexture(TexCacheEntry *entry) {
 		lastBoundTexture = entry->textureName;
 	}
 	int maxLevel = (entry->status & TexCacheEntry::STATUS_BAD_MIPS) ? 0 : entry->maxLevel;
-	SamplerCacheKey samplerKey = GetSamplingParams(maxLevel, entry->addr);
+	SamplerCacheKey samplerKey = GetSamplingParams(maxLevel, entry);
 	ApplySamplingParams(samplerKey);
 	gstate_c.SetUseShaderDepal(false);
 }
@@ -327,7 +326,6 @@ public:
 	}
 
 	void Shade(GLRenderManager *render) {
-		static const GLubyte indices[4] = { 0, 1, 3, 2 };
 		render->SetViewport(GLRViewport{ 0, 0, (float)renderW_, (float)renderH_, 0.0f, 1.0f });
 		render->Draw(GL_TRIANGLE_STRIP, 0, 4);
 	}
@@ -343,13 +341,15 @@ protected:
 };
 
 void TextureCacheGLES::ApplyTextureFramebuffer(VirtualFramebuffer *framebuffer, GETextureFormat texFormat, FramebufferNotificationChannel channel) {
-	DepalShader *depal = nullptr;
+	DepalShader *depalShader = nullptr;
 	uint32_t clutMode = gstate.clutformat & 0xFFFFFF;
 	bool need_depalettize = IsClutFormat(texFormat);
 
-	bool useShaderDepal = framebufferManager_->GetCurrentRenderVFB() != framebuffer && (gstate_c.Supports(GPU_SUPPORTS_GLSL_ES_300) || gstate_c.Supports(GPU_SUPPORTS_GLSL_330));
+	bool depth = channel == NOTIFY_FB_DEPTH;
+	bool useShaderDepal = framebufferManager_->GetCurrentRenderVFB() != framebuffer && (gstate_c.Supports(GPU_SUPPORTS_GLSL_ES_300) || gstate_c.Supports(GPU_SUPPORTS_GLSL_330)) && !depth;
 	if (!gstate_c.Supports(GPU_SUPPORTS_32BIT_INT_FSHADER)) {
 		useShaderDepal = false;
+		depth = false;  // Can't support this
 	}
 
 	if (need_depalettize && !g_Config.bDisableSlowFramebufEffects) {
@@ -377,10 +377,10 @@ void TextureCacheGLES::ApplyTextureFramebuffer(VirtualFramebuffer *framebuffer, 
 			return;
 		}
 
+		depalShader = depalShaderCache_->GetDepalettizeShader(clutMode, depth ? GE_FORMAT_DEPTH16 : framebuffer->drawnFormat);
 		gstate_c.SetUseShaderDepal(false);
-		depal = depalShaderCache_->GetDepalettizeShader(clutMode, framebuffer->drawnFormat);
 	}
-	if (depal) {
+	if (depalShader) {
 		shaderManager_->DirtyLastShader();
 
 		const GEPaletteFormat clutFormat = gstate.getClutPaletteFormat();
@@ -390,11 +390,12 @@ void TextureCacheGLES::ApplyTextureFramebuffer(VirtualFramebuffer *framebuffer, 
 
 		render_->SetScissor(GLRect2D{ 0, 0, (int)framebuffer->renderWidth, (int)framebuffer->renderHeight });
 		render_->SetViewport(GLRViewport{ 0.0f, 0.0f, (float)framebuffer->renderWidth, (float)framebuffer->renderHeight, 0.0f, 1.0f });
-		TextureShaderApplier shaderApply(depal, framebuffer->bufferWidth, framebuffer->bufferHeight, framebuffer->renderWidth, framebuffer->renderHeight);
+		TextureShaderApplier shaderApply(depalShader, framebuffer->bufferWidth, framebuffer->bufferHeight, framebuffer->renderWidth, framebuffer->renderHeight);
 		shaderApply.ApplyBounds(gstate_c.vertBounds, gstate_c.curTextureXOffset, gstate_c.curTextureYOffset);
 		shaderApply.Use(render_, drawEngine_, shadeInputLayout_);
 
-		framebufferManagerGL_->BindFramebufferAsColorTexture(0, framebuffer, BINDFBCOLOR_SKIP_COPY | BINDFBCOLOR_FORCE_SELF);
+		draw_->BindFramebufferAsTexture(framebuffer->fbo, 0, depth ? Draw::FB_DEPTH_BIT : Draw::FB_COLOR_BIT, 0);
+
 		render_->BindTexture(TEX_SLOT_CLUT, clutTexture);
 		render_->SetTextureSampler(TEX_SLOT_CLUT, GL_REPEAT, GL_CLAMP_TO_EDGE, GL_NEAREST, GL_NEAREST, 0.0f);
 
@@ -698,7 +699,7 @@ void TextureCacheGLES::LoadTextureLevel(TexCacheEntry &entry, ReplacedTexture &r
 			replacedInfo.cachekey = entry.CacheKey();
 			replacedInfo.hash = entry.fullhash;
 			replacedInfo.addr = entry.addr;
-			replacedInfo.isVideo = videos_.find(entry.addr & 0x3FFFFFFF) != videos_.end();
+			replacedInfo.isVideo = IsVideo(entry.addr);
 			replacedInfo.isFinal = (entry.status & TexCacheEntry::STATUS_TO_SCALE) == 0;
 			replacedInfo.scaleFactor = scaleFactor;
 			replacedInfo.fmt = FromDataFormat(dstFmt);

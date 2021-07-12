@@ -69,7 +69,7 @@ bool MainThread_Ready() {
 }
 
 static void EmuThreadFunc(GraphicsContext *graphicsContext) {
-	setCurrentThreadName("Emu");
+	SetCurrentThreadName("Emu");
 
 	// There's no real requirement that NativeInit happen on this thread.
 	// We just call the update/render loop here.
@@ -111,10 +111,10 @@ static void EmuThreadJoin() {
 void MainThreadFunc() {
 	if (useEmuThread) {
 		// We'll start up a separate thread we'll call Emu
-		setCurrentThreadName("Render");
+		SetCurrentThreadName("Render");
 	} else {
 		// This is both Emu and Render.
-		setCurrentThreadName("Emu");
+		SetCurrentThreadName("Emu");
 	}
 
 	host = new WindowsHost(MainWindow::GetHInstance(), MainWindow::GetHWND(), MainWindow::GetDisplayHWND());
@@ -131,18 +131,18 @@ void MainThreadFunc() {
 		args.push_back(string.c_str());
 	}
 	bool performingRestart = NativeIsRestarting();
-	NativeInit(static_cast<int>(args.size()), &args[0], "1234", "1234", nullptr);
+	NativeInit(static_cast<int>(args.size()), &args[0], "", "", nullptr);
 
 	if (g_Config.iGPUBackend == (int)GPUBackend::OPENGL) {
 		if (!useEmuThread) {
 			// Okay, we must've switched to OpenGL.  Let's flip the emu thread on.
 			useEmuThread = true;
-			setCurrentThreadName("Render");
+			SetCurrentThreadName("Render");
 		}
 	} else if (useEmuThread) {
 		// We must've failed over from OpenGL, flip the emu thread off.
 		useEmuThread = false;
-		setCurrentThreadName("Emu");
+		SetCurrentThreadName("Emu");
 	}
 
 	if (g_Config.sFailedGPUBackends.find("ALL") != std::string::npos) {
@@ -202,7 +202,7 @@ void MainThreadFunc() {
 		std::string full_error = StringFromFormat("%s\n\n%s", genericError, error_string.c_str());
 		std::wstring title = ConvertUTF8ToWString(err->T("GenericGraphicsError", "Graphics Error"));
 		bool yes = IDYES == MessageBox(0, ConvertUTF8ToWString(full_error).c_str(), title.c_str(), MB_ICONERROR | MB_YESNO);
-		ERROR_LOG(BOOT, full_error.c_str());
+		ERROR_LOG(BOOT, "%s", full_error.c_str());
 
 		if (yes) {
 			// Change the config to the alternative and restart.
@@ -263,6 +263,9 @@ void MainThreadFunc() {
 			if (!Core_IsActive())
 				UpdateUIState(UISTATE_MENU);
 			Core_Run(g_graphicsContext);
+			if (coreState == CORE_BOOT_ERROR) {
+				break;
+			}
 		}
 	}
 	Core_Stop();

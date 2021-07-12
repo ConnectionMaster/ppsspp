@@ -68,7 +68,9 @@ PortManager::~PortManager() {
 void PortManager::Terminate() {
 	VERBOSE_LOG(SCENET, "PortManager::Terminate()");
 	if (urls) {
+#ifdef WITH_UPNP
 		FreeUPNPUrls(urls);
+#endif
 		free(urls);
 		urls = NULL;
 	}
@@ -86,6 +88,7 @@ void PortManager::Terminate() {
 }
 
 bool PortManager::Initialize(const unsigned int timeout) {
+#ifdef WITH_UPNP
 	// Windows: Assuming WSAStartup already called beforehand
 	struct UPNPDev* devlist;
 	struct UPNPDev* dev;
@@ -178,9 +181,12 @@ bool PortManager::Initialize(const unsigned int timeout) {
 	}
 
 	ERROR_LOG(SCENET, "PortManager - upnpDiscover failed (error: %i) or No UPnP device detected", error);
-	auto n = GetI18NCategory("Networking");
-	host->NotifyUserMessage(n->T("Unable to find UPnP device"), 2.0f, 0x0000ff);
+	if (g_Config.bEnableUPnP) {
+		auto n = GetI18NCategory("Networking");
+		host->NotifyUserMessage(n->T("Unable to find UPnP device"), 2.0f, 0x0000ff);
+	}
 	m_InitState = UPNP_INITSTATE_NONE;
+#endif // WITH_UPNP
 	return false;
 }
 
@@ -189,16 +195,22 @@ int PortManager::GetInitState() {
 }
 
 bool PortManager::Add(const char* protocol, unsigned short port, unsigned short intport) {
+#ifdef WITH_UPNP
 	char port_str[16];
 	char intport_str[16];
 	int r;
+	auto n = GetI18NCategory("Networking");
 	
 	if (intport == 0)
 		intport = port;
 	INFO_LOG(SCENET, "PortManager::Add(%s, %d, %d)", protocol, port, intport);
 	if (urls == NULL || urls->controlURL == NULL || urls->controlURL[0] == '\0')
 	{
-		if (g_Config.bEnableUPnP) WARN_LOG(SCENET, "PortManager::Add - the init was not done !");
+		if (g_Config.bEnableUPnP) {
+			WARN_LOG(SCENET, "PortManager::Add - the init was not done !");
+			host->NotifyUserMessage(n->T("UPnP need to be reinitialized"), 2.0f, 0x0000ff);
+		}
+		Terminate();
 		return false;
 	}
 	sprintf(port_str, "%d", port);
@@ -224,8 +236,9 @@ bool PortManager::Add(const char* protocol, unsigned short port, unsigned short 
 		{
 			ERROR_LOG(SCENET, "PortManager - AddPortMapping failed (error: %i)", r);
 			if (r == UPNPCOMMAND_HTTP_ERROR) {
-				auto n = GetI18NCategory("Networking");
-				host->NotifyUserMessage(n->T("UPnP need to be reinitialized"), 2.0f, 0x0000ff);
+				if (g_Config.bEnableUPnP) {
+					host->NotifyUserMessage(n->T("UPnP need to be reinitialized"), 2.0f, 0x0000ff);
+				}
 				Terminate(); // Most of the time errors occurred because the router is no longer reachable (ie. changed networks) so we should invalidate the state to prevent further lags due to timeouts
 				return false;
 			}
@@ -235,15 +248,24 @@ bool PortManager::Add(const char* protocol, unsigned short port, unsigned short 
 		if (el_it != m_otherPortList.end()) el_it->taken = true;
 	}
 	return true;
+#else
+	return false;
+#endif // WITH_UPNP
 }
 
 bool PortManager::Remove(const char* protocol, unsigned short port) {
+#ifdef WITH_UPNP
 	char port_str[16];
+	auto n = GetI18NCategory("Networking");
 
 	INFO_LOG(SCENET, "PortManager::Remove(%s, %d)", protocol, port);
 	if (urls == NULL || urls->controlURL == NULL || urls->controlURL[0] == '\0')
 	{
-		if (g_Config.bEnableUPnP) WARN_LOG(SCENET, "PortManager::Remove - the init was not done !");
+		if (g_Config.bEnableUPnP) {
+			WARN_LOG(SCENET, "PortManager::Remove - the init was not done !");
+			host->NotifyUserMessage(n->T("UPnP need to be reinitialized"), 2.0f, 0x0000ff);
+		}
+		Terminate();
 		return false;
 	}
 	sprintf(port_str, "%d", port);
@@ -252,8 +274,9 @@ bool PortManager::Remove(const char* protocol, unsigned short port) {
 	{
 		ERROR_LOG(SCENET, "PortManager - DeletePortMapping failed (error: %i)", r);
 		if (r == UPNPCOMMAND_HTTP_ERROR) {
-			auto n = GetI18NCategory("Networking");
-			host->NotifyUserMessage(n->T("UPnP need to be reinitialized"), 2.0f, 0x0000ff);
+			if (g_Config.bEnableUPnP) {
+				host->NotifyUserMessage(n->T("UPnP need to be reinitialized"), 2.0f, 0x0000ff);
+			}
 			Terminate(); // Most of the time errors occurred because the router is no longer reachable (ie. changed networks) so we should invalidate the state to prevent further lags due to timeouts
 			return false;
 		}
@@ -262,9 +285,13 @@ bool PortManager::Remove(const char* protocol, unsigned short port) {
 		(it->first == port_str && it->second == protocol) ? it = m_portList.erase(it) : ++it;
 	}
 	return true;
+#else
+	return false;
+#endif // WITH_UPNP
 }
 
 bool PortManager::Restore() {
+#ifdef WITH_UPNP
 	int r;
 	VERBOSE_LOG(SCENET, "PortManager::Restore()");
 	if (urls == NULL || urls->controlURL == NULL || urls->controlURL[0] == '\0')
@@ -304,9 +331,13 @@ bool PortManager::Restore() {
 		}
 	}
 	return true;
+#else
+	return false;
+#endif // WITH_UPNP
 }
 
 bool PortManager::Clear() {
+#ifdef WITH_UPNP
 	int r;
 	int i = 0;
 	char index[6];
@@ -358,9 +389,13 @@ bool PortManager::Clear() {
 		i++;
 	} while (r == 0);
 	return true;
+#else
+	return false;
+#endif // WITH_UPNP
 }
 
 bool PortManager::RefreshPortList() {
+#ifdef WITH_UPNP
 	int r;
 	int i = 0;
 	char index[6];
@@ -411,11 +446,14 @@ bool PortManager::RefreshPortList() {
 		i++;
 	} while (r == 0);
 	return true;
+#else
+	return false;
+#endif // WITH_UPNP
 }
 
 int upnpService(const unsigned int timeout)
 {
-	setCurrentThreadName("UPnPService");
+	SetCurrentThreadName("UPnPService");
 	INFO_LOG(SCENET, "UPnPService: Begin of UPnPService Thread");
 
 	// Service Loop

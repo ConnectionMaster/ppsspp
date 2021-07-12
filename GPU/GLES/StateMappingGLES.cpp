@@ -19,7 +19,7 @@
 // Alpha/stencil is a convoluted mess. Some good comments are here:
 // https://github.com/hrydgard/ppsspp/issues/3768
 
-
+#include "ppsspp_config.h"
 #include "StateMappingGLES.h"
 #include "Common/Profiler/Profiler.h"
 #include "Common/GPU/OpenGL/GLDebugLog.h"
@@ -58,7 +58,7 @@ static const GLushort glBlendFactorLookup[(size_t)BlendFactor::COUNT] = {
 	GL_ONE_MINUS_SRC1_COLOR,
 	GL_SRC1_ALPHA,
 	GL_ONE_MINUS_SRC1_ALPHA,
-#elif !defined(IOS)
+#elif !PPSSPP_PLATFORM(IOS)
 	GL_SRC1_COLOR_EXT,
 	GL_ONE_MINUS_SRC1_COLOR_EXT,
 	GL_SRC1_ALPHA_EXT,
@@ -230,18 +230,37 @@ void DrawEngineGLES::ApplyDrawState(int prim) {
 		GLenum cullMode = cullingMode[gstate.getCullMode() ^ !useBufferedRendering];
 
 		cullEnable = !gstate.isModeClear() && prim != GE_PRIM_RECTANGLES && gstate.isCullEnabled();
-		renderManager->SetRaster(cullEnable, GL_CCW, cullMode, dither);
+
+		bool depthClampEnable = false;
+		if (gstate.isModeClear() || gstate.isModeThrough()) {
+			// TODO: Might happen in clear mode if not through...
+			depthClampEnable = false;
+		} else {
+			if (gstate.getDepthRangeMin() == 0 || gstate.getDepthRangeMax() == 65535) {
+				// TODO: Still has a bug where we clamp to depth range if one is not the full range.
+				// But the alternate is not clamping in either direction...
+				depthClampEnable = gstate.isDepthClampEnabled() && gstate_c.Supports(GPU_SUPPORTS_DEPTH_CLAMP);
+			} else {
+				// We just want to clip in this case, the clamp would be clipped anyway.
+				depthClampEnable = false;
+			}
+		}
+
+		renderManager->SetRaster(cullEnable, GL_CCW, cullMode, dither, depthClampEnable);
 	}
 
 	if (gstate_c.IsDirty(DIRTY_DEPTHSTENCIL_STATE)) {
 		gstate_c.Clean(DIRTY_DEPTHSTENCIL_STATE);
+		GenericStencilFuncState stencilState;
+		ConvertStencilFuncState(stencilState);
+
 		if (gstate.isModeClear()) {
 			// Depth Test
 			if (gstate.isClearModeDepthMask()) {
 				framebufferManager_->SetDepthUpdated();
 			}
 			renderManager->SetStencilFunc(gstate.isClearModeAlphaMask(), GL_ALWAYS, 0xFF, 0xFF);
-			renderManager->SetStencilOp((~gstate.getStencilWriteMask()) & 0xFF, GL_REPLACE, GL_REPLACE, GL_REPLACE);
+			renderManager->SetStencilOp(stencilState.writeMask, GL_REPLACE, GL_REPLACE, GL_REPLACE);
 			renderManager->SetDepth(true, gstate.isClearModeDepthMask() ? true : false, GL_ALWAYS);
 		} else {
 			// Depth Test
@@ -250,8 +269,6 @@ void DrawEngineGLES::ApplyDrawState(int prim) {
 				framebufferManager_->SetDepthUpdated();
 			}
 
-			GenericStencilFuncState stencilState;
-			ConvertStencilFuncState(stencilState);
 			// Stencil Test
 			if (stencilState.enabled) {
 				renderManager->SetStencilFunc(stencilState.enabled, compareOps[stencilState.testFunc], stencilState.testRef, stencilState.testMask);

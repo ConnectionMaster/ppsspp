@@ -28,12 +28,6 @@
 #include "GPU/Common/GPUDebugInterface.h"
 #include "GPU/Common/TextureDecoder.h"
 
-enum TextureFiltering {
-	TEX_FILTER_AUTO = 1,
-	TEX_FILTER_FORCE_NEAREST = 2,
-	TEX_FILTER_FORCE_LINEAR = 3,
-};
-
 enum FramebufferNotification {
 	NOTIFY_FB_CREATED,
 	NOTIFY_FB_UPDATED,
@@ -53,6 +47,7 @@ enum FramebufferNotificationChannel {
 #define TEXCACHE_MAX_TEXELS_SCALED (256*256)  // Per frame
 
 struct VirtualFramebuffer;
+class TextureReplacer;
 
 namespace Draw {
 class DrawContext;
@@ -144,7 +139,7 @@ struct TexCacheEntry {
 	int status;
 
 	u32 addr;
-	u32 hash;
+	u32 minihash;
 	u32 sizeInRAM;  // Could be computed
 	u8 format;  // GeTextureFormat
 	u8 maxLevel;
@@ -290,7 +285,7 @@ protected:
 
 	u32 EstimateTexMemoryUsage(const TexCacheEntry *entry);
 
-	SamplerCacheKey GetSamplingParams(int maxLevel, u32 texAddr);
+	SamplerCacheKey GetSamplingParams(int maxLevel, const TexCacheEntry *entry);
 	SamplerCacheKey GetFramebufferSamplingParams(u16 bufferWidth, u16 bufferHeight);
 	void UpdateMaxSeenV(TexCacheEntry *entry, bool throughMode);
 
@@ -302,6 +297,7 @@ protected:
 	void SetTextureFramebuffer(const AttachCandidate &candidate);
 
 	void DecimateVideos();
+	bool IsVideo(u32 texaddr);
 
 	inline u32 QuickTexHash(TextureReplacer &replacer, u32 addr, int bufw, int w, int h, GETextureFormat format, TexCacheEntry *entry) const {
 		if (replacer.Enabled()) {
@@ -336,16 +332,21 @@ protected:
 	bool lowMemoryMode_ = false;
 
 	int decimationCounter_;
-	int texelsScaledThisFrame_;
-	int timesInvalidatedAllThisFrame_;
+	int texelsScaledThisFrame_ = 0;
+	int timesInvalidatedAllThisFrame_ = 0;
 
 	TexCache cache_;
-	u32 cacheSizeEstimate_;
+	u32 cacheSizeEstimate_ = 0;
 
 	TexCache secondCache_;
-	u32 secondCacheSizeEstimate_;
+	u32 secondCacheSizeEstimate_ = 0;
 
-	std::map<u32, int> videos_;
+	struct VideoInfo {
+		u32 addr;
+		u32 size;
+		int flips;
+	};
+	std::vector<VideoInfo> videos_;
 
 	SimpleBuf<u32> tmpTexBuf32_;
 	SimpleBuf<u32> tmpTexBufRearrange_;

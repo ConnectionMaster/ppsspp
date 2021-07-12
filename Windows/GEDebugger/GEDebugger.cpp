@@ -15,14 +15,15 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include <cmath>
 #include <functional>
 #include <set>
 #include <string>
 #include <vector>
 
-#include "Common/Data/Text/Parsers.h"
+#include "Common/Data/Convert/ColorConv.h"
 #include "Common/Data/Encoding/Utf8.h"
-#include "Common/ColorConv.h"
+#include "Common/Data/Text/Parsers.h"
 #include "Common/StringUtils.h"
 #include "Core/Config.h"
 #include "Core/Screenshot.h"
@@ -312,6 +313,8 @@ void CGEDebugger::PreviewExport(const GPUDebugBuffer *dbgBuffer) {
 	std::string fn;
 	if (W32Util::BrowseForFileName(false, GetDlgHandle(), L"Save Preview Image...", nullptr, filter, L"png", fn)) {
 		ScreenshotFormat fmt = fn.find(".jpg") != fn.npos ? ScreenshotFormat::JPG : ScreenshotFormat::PNG;
+
+		Path filename(fn);
 		bool saveAlpha = fmt == ScreenshotFormat::PNG;
 
 		u8 *flipbuffer = nullptr;
@@ -320,9 +323,9 @@ void CGEDebugger::PreviewExport(const GPUDebugBuffer *dbgBuffer) {
 		const u8 *buffer = ConvertBufferToScreenshot(*dbgBuffer, saveAlpha, flipbuffer, w, h);
 		if (buffer != nullptr) {
 			if (saveAlpha) {
-				Save8888RGBAScreenshot(fn.c_str(), buffer, w, h);
+				Save8888RGBAScreenshot(filename, buffer, w, h);
 			} else {
-				Save888RGBScreenshot(fn.c_str(), fmt, buffer, w, h);
+				Save888RGBScreenshot(filename, fmt, buffer, w, h);
 			}
 		}
 		delete [] flipbuffer;
@@ -335,7 +338,7 @@ void CGEDebugger::UpdatePreviews() {
 		return;
 	}
 
-	GPUgstate state = {0};
+	GPUgstate state{};
 
 	if (gpuDebug != nullptr) {
 		state = gpuDebug->GetGState();
@@ -486,7 +489,7 @@ void CGEDebugger::PrimaryPreviewHover(int x, int y) {
 		desc[0] = 0;
 	} else if (x < 0 || y < 0) {
 		// This means they left the area.
-		GPUgstate state = {0};
+		GPUgstate state{};
 		if (gpuDebug != nullptr) {
 			state = gpuDebug->GetGState();
 		}
@@ -514,7 +517,7 @@ void CGEDebugger::SecondPreviewHover(int x, int y) {
 		desc[0] = 0;
 	} else if (x < 0 || y < 0) {
 		// This means they left the area.
-		GPUgstate state = {0};
+		GPUgstate state{};
 		if (gpuDebug != nullptr) {
 			state = gpuDebug->GetGState();
 		}
@@ -676,7 +679,7 @@ void CGEDebugger::DescribePixelRGBA(u32 pix, GPUDebugBufferFormat fmt, int x, in
 }
 
 void CGEDebugger::UpdateTextureLevel(int level) {
-	GPUgstate state = {0};
+	GPUgstate state{};
 	if (gpuDebug != nullptr) {
 		state = gpuDebug->GetGState();
 	}

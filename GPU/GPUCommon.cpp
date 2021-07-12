@@ -1,10 +1,11 @@
+#include "ppsspp_config.h"
 #include <algorithm>
 #include <type_traits>
 #include <mutex>
 
 #include "Common/Profiler/Profiler.h"
 
-#include "Common/ColorConv.h"
+#include "Common/Data/Convert/ColorConv.h"
 #include "Common/GraphicsContext.h"
 #include "Common/Serialize/Serializer.h"
 #include "Common/Serialize/SerializeFuncs.h"
@@ -17,6 +18,7 @@
 #include "GPU/GPUState.h"
 #include "Core/Config.h"
 #include "Core/CoreTiming.h"
+#include "Core/Debugger/MemBlockInfo.h"
 #include "Core/MemMap.h"
 #include "Core/Host.h"
 #include "Core/Reporting.h"
@@ -25,7 +27,6 @@
 #include "Core/HLE/sceKernelInterrupt.h"
 #include "Core/HLE/sceKernelThread.h"
 #include "Core/HLE/sceGe.h"
-#include "Core/Debugger/Breakpoints.h"
 #include "Core/MemMapHelpers.h"
 #include "Core/Util/PPGeDraw.h"
 #include "GPU/Common/DrawEngineCommon.h"
@@ -367,10 +368,6 @@ void GPUCommon::Flush() {
 }
 
 GPUCommon::GPUCommon(GraphicsContext *gfxCtx, Draw::DrawContext *draw) :
-	dumpNextFrame_(false),
-	dumpThisFrame_(false),
-	framebufferManager_(nullptr),
-	resized_(false),
 	gfxCtx_(gfxCtx),
 	draw_(draw)
 {
@@ -675,7 +672,7 @@ int GPUCommon::GetStack(int index, u32 stackPtr) {
 	}
 
 	if (index >= 0) {
-		auto stack = PSPPointer<u32>::Create(stackPtr);
+		auto stack = PSPPointer<u32_le>::Create(stackPtr);
 		if (stack.IsValid()) {
 			auto entry = currentList->stack[index];
 			// Not really sure what most of these values are.
@@ -706,7 +703,7 @@ u32 GPUCommon::EnqueueList(u32 listpc, u32 stall, int subIntrBase, PSPPointer<Ps
 
 	int id = -1;
 	u64 currentTicks = CoreTiming::GetTicks();
-	u32_le stackAddr = args.IsValid() && args->size >= 16 ? args->stackAddr : 0;
+	u32 stackAddr = args.IsValid() && args->size >= 16 ? (u32)args->stackAddr : 0;
 	// Check compatibility
 	if (sceKernelGetCompiledSdkVersion() > 0x01FFFFFF) {
 		//numStacks = 0;
@@ -954,7 +951,9 @@ void GPUCommon::NotifySteppingExit() {
 		if (timeSteppingStarted_ <= 0.0) {
 			ERROR_LOG(G3D, "Mismatched stepping enter/exit.");
 		}
-		timeSpentStepping_ += time_now_d() - timeSteppingStarted_;
+		double total = time_now_d() - timeSteppingStarted_;
+		_dbg_assert_msg_(total >= 0.0, "Time spent stepping became negative");
+		timeSpentStepping_ += total;
 		timeSteppingStarted_ = 0.0;
 	}
 }
@@ -1028,6 +1027,7 @@ bool GPUCommon::InterpretList(DisplayList &list) {
 
 	if (coreCollectDebugStats) {
 		double total = time_now_d() - start - timeSpentStepping_;
+		_dbg_assert_msg_(total >= 0.0, "Time spent DL processing became negative");
 		hleSetSteppingTime(timeSpentStepping_);
 		timeSpentStepping_ = 0.0;
 		gpuStats.msProcessingDisplayLists += total;
@@ -1042,7 +1042,7 @@ void GPUCommon::FastRunLoop(DisplayList &list) {
 	int dc = downcount;
 	for (; dc > 0; --dc) {
 		// We know that display list PCs have the upper nibble == 0 - no need to mask the pointer
-		const u32 op = *(const u32 *)(Memory::base + list.pc);
+		const u32 op = *(const u32_le *)(Memory::base + list.pc);
 		const u32 cmd = op >> 24;
 		const CommandInfo &info = cmdInfo[cmd];
 		const u32 diff = op ^ gstate.cmdmem[cmd];
@@ -1480,6 +1480,14 @@ void GPUCommon::Execute_End(u32 op, u32 diff) {
 		default:
 			currentList->subIntrToken = prev & 0xFFFF;
 			UpdateState(GPUSTATE_DONE);
+			// Since we marked done, we have to restore the context now before the next list runs.
+			if (currentList->started && currentList->context.IsValid()) {
+				gstate.Restore(currentList->context);
+				ReapplyGfxState();
+				// Don't restore the context again.
+				currentList->started = false;
+			}
+
 			if (currentList->interruptsEnabled && __GeTriggerInterrupt(currentList->id, currentList->pc, startingTicks + cyclesExecuted)) {
 				currentList->pendingInterrupt = true;
 			} else {
@@ -1487,10 +1495,6 @@ void GPUCommon::Execute_End(u32 op, u32 diff) {
 				currentList->waitTicks = startingTicks + cyclesExecuted;
 				busyTicks = std::max(busyTicks, currentList->waitTicks);
 				__GeTriggerSync(GPU_SYNC_LIST, currentList->id, currentList->waitTicks);
-				if (currentList->started && currentList->context.IsValid()) {
-					gstate.Restore(currentList->context);
-					ReapplyGfxState();
-				}
 			}
 			break;
 		}
@@ -1633,8 +1637,8 @@ void GPUCommon::Execute_Prim(u32 op, u32 diff) {
 	int totalVertCount = count;
 
 	// PRIMs are often followed by more PRIMs. Save some work and submit them immediately.
-	const u32 *src = (const u32 *)Memory::GetPointerUnchecked(currentList->pc + 4);
-	const u32 *stall = currentList->stall ? (const u32 *)Memory::GetPointerUnchecked(currentList->stall) : 0;
+	const u32_le *src = (const u32_le *)Memory::GetPointerUnchecked(currentList->pc + 4);
+	const u32_le *stall = currentList->stall ? (const u32_le *)Memory::GetPointerUnchecked(currentList->stall) : 0;
 	int cmdCount = 0;
 
 	// Optimized submission of sequences of PRIM. Allows us to avoid going through all the mess
@@ -2241,7 +2245,6 @@ void GPUCommon::Execute_ImmVertexAlphaPrim(u32 op, u32 diff) {
 		return;
 	}
 
-	uint32_t data = op & 0xFFFFFF;
 	TransformedVertex &v = immBuffer_[immCount_++];
 
 	// Formula deduced from ThrillVille's clear.
@@ -2718,8 +2721,11 @@ void GPUCommon::DoBlockTransfer(u32 skipDrawReason) {
 		framebufferManager_->NotifyBlockTransferAfter(dstBasePtr, dstStride, dstX, dstY, srcBasePtr, srcStride, srcX, srcY, width, height, bpp, skipDrawReason);
 	}
 
-	CBreakPoints::ExecMemCheck(srcBasePtr + (srcY * srcStride + srcX) * bpp, false, height * srcStride * bpp, currentMIPS->pc);
-	CBreakPoints::ExecMemCheck(dstBasePtr + (dstY * dstStride + dstX) * bpp, true, height * dstStride * bpp, currentMIPS->pc);
+	const uint32_t src = srcBasePtr + (srcY * srcStride + srcX) * bpp;
+	const uint32_t srcSize = height * srcStride * bpp;
+	const std::string tag = "GPUBlockTransfer/" + GetMemWriteTagAt(src, srcSize);
+	NotifyMemInfo(MemBlockFlags::READ, src, srcSize, tag.c_str(), tag.size());
+	NotifyMemInfo(MemBlockFlags::WRITE, dstBasePtr + (dstY * dstStride + dstX) * bpp, height * dstStride * bpp, tag.c_str(), tag.size());
 
 	// TODO: Correct timing appears to be 1.9, but erring a bit low since some of our other timing is inaccurate.
 	cyclesExecuted += ((height * width * bpp) * 16) / 10;
@@ -2729,18 +2735,20 @@ bool GPUCommon::PerformMemoryCopy(u32 dest, u32 src, int size) {
 	// Track stray copies of a framebuffer in RAM. MotoGP does this.
 	if (framebufferManager_->MayIntersectFramebuffer(src) || framebufferManager_->MayIntersectFramebuffer(dest)) {
 		if (!framebufferManager_->NotifyFramebufferCopy(src, dest, size, false, gstate_c.skipDrawReason)) {
-			// TODO: What? Why would a game copy between the mirrors? This check seems entirely
-			// superfluous.
-			// We use a little hack for Download/Upload using a VRAM mirror.
+			// We use a little hack for PerformMemoryDownload/PerformMemoryUpload using a VRAM mirror.
 			// Since they're identical we don't need to copy.
 			if (!Memory::IsVRAMAddress(dest) || (dest ^ 0x00400000) != src) {
-				Memory::Memcpy(dest, src, size);
+				const std::string tag = "GPUMemcpy/" + GetMemWriteTagAt(src, size);
+				Memory::Memcpy(dest, src, size, tag.c_str(), tag.size());
 			}
 		}
 		InvalidateCache(dest, size, GPU_INVALIDATE_HINT);
 		return true;
 	}
 
+	const std::string tag = "GPUMemcpy/" + GetMemWriteTagAt(src, size);
+	NotifyMemInfo(MemBlockFlags::READ, src, size, tag.c_str(), tag.size());
+	NotifyMemInfo(MemBlockFlags::WRITE, dest, size, tag.c_str(), tag.size());
 	InvalidateCache(dest, size, GPU_INVALIDATE_HINT);
 	GPURecord::NotifyMemcpy(dest, src, size);
 	return false;
@@ -2749,13 +2757,14 @@ bool GPUCommon::PerformMemoryCopy(u32 dest, u32 src, int size) {
 bool GPUCommon::PerformMemorySet(u32 dest, u8 v, int size) {
 	// This may indicate a memset, usually to 0, of a framebuffer.
 	if (framebufferManager_->MayIntersectFramebuffer(dest)) {
-		Memory::Memset(dest, v, size);
+		Memory::Memset(dest, v, size, "GPUMemset");
 		if (!framebufferManager_->NotifyFramebufferCopy(dest, dest, size, true, gstate_c.skipDrawReason)) {
 			InvalidateCache(dest, size, GPU_INVALIDATE_HINT);
 		}
 		return true;
 	}
 
+	NotifyMemInfo(MemBlockFlags::WRITE, dest, size, "GPUMemset");
 	// Or perhaps a texture, let's invalidate.
 	InvalidateCache(dest, size, GPU_INVALIDATE_HINT);
 	GPURecord::NotifyMemset(dest, v, size);

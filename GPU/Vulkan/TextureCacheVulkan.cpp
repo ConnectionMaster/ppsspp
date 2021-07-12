@@ -26,7 +26,7 @@
 #include "Common/GPU/thin3d.h"
 #include "Common/GPU/Vulkan/VulkanRenderManager.h"
 
-#include "Common/ColorConv.h"
+#include "Common/Data/Convert/ColorConv.h"
 #include "Common/StringUtils.h"
 #include "Core/Config.h"
 #include "Core/Host.h"
@@ -43,6 +43,7 @@
 #include "GPU/Common/PostShader.h"
 #include "GPU/Common/TextureCacheCommon.h"
 #include "GPU/Common/TextureDecoder.h"
+#include "GPU/Vulkan/VulkanContext.h"
 #include "GPU/Vulkan/TextureCacheVulkan.h"
 #include "GPU/Vulkan/FramebufferManagerVulkan.h"
 #include "GPU/Vulkan/DepalettizeShaderVulkan.h"
@@ -52,17 +53,6 @@
 #define TEXCACHE_MIN_SLAB_SIZE (8 * 1024 * 1024)
 #define TEXCACHE_MAX_SLAB_SIZE (32 * 1024 * 1024)
 #define TEXCACHE_SLAB_PRESSURE 4
-
-// Note: some drivers prefer B4G4R4A4_UNORM_PACK16 over R4G4B4A4_UNORM_PACK16.
-#define VULKAN_4444_FORMAT VK_FORMAT_B4G4R4A4_UNORM_PACK16
-#define VULKAN_1555_FORMAT VK_FORMAT_A1R5G5B5_UNORM_PACK16
-#define VULKAN_565_FORMAT  VK_FORMAT_B5G6R5_UNORM_PACK16
-#define VULKAN_8888_FORMAT VK_FORMAT_R8G8B8A8_UNORM
-
-static const VkComponentMapping VULKAN_4444_SWIZZLE = { VK_COMPONENT_SWIZZLE_A, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B };
-static const VkComponentMapping VULKAN_1555_SWIZZLE = { VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_A };
-static const VkComponentMapping VULKAN_565_SWIZZLE = { VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A };
-static const VkComponentMapping VULKAN_8888_SWIZZLE = { VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A };
 
 const char *copyShader = R"(
 #version 450
@@ -297,9 +287,8 @@ std::vector<std::string> SamplerCache::DebugGetSamplerIDs() const {
 TextureCacheVulkan::TextureCacheVulkan(Draw::DrawContext *draw, VulkanContext *vulkan)
 	: TextureCacheCommon(draw),
 		vulkan_(vulkan),
-		samplerCache_(vulkan),
-		computeShaderManager_(vulkan) {
-	timesInvalidatedAllThisFrame_ = 0;
+		computeShaderManager_(vulkan),
+		samplerCache_(vulkan) {
 	DeviceRestore(vulkan, draw);
 	SetupTextureDecoder();
 }
@@ -376,7 +365,7 @@ void TextureCacheVulkan::NotifyConfigChanged() {
 	CompileScalingShader();
 }
 
-static std::string ReadShaderSrc(const std::string &filename) {
+static std::string ReadShaderSrc(const Path &filename) {
 	size_t sz = 0;
 	char *data = (char *)VFSReadFile(filename.c_str(), &sz);
 	if (!data)
@@ -394,6 +383,7 @@ void TextureCacheVulkan::CompileScalingShader() {
 		if (copyCS_ != VK_NULL_HANDLE)
 			vulkan_->Delete().QueueDeleteShaderModule(copyCS_);
 		textureShader_.clear();
+		maxScaleFactor_ = 255;
 	} else if (uploadCS_ || copyCS_) {
 		// No need to recreate.
 		return;
@@ -417,6 +407,7 @@ void TextureCacheVulkan::CompileScalingShader() {
 	_dbg_assert_msg_(copyCS_ != VK_NULL_HANDLE, "failed to compile copy shader");
 
 	textureShader_ = g_Config.sTextureShaderName;
+	maxScaleFactor_ = shaderInfo->maxScale;
 }
 
 void TextureCacheVulkan::ReleaseTexture(TexCacheEntry *entry, bool delete_them) {
@@ -518,7 +509,7 @@ void TextureCacheVulkan::BindTexture(TexCacheEntry *entry) {
 	entry->vkTex->Touch();
 	imageView_ = entry->vkTex->GetImageView();
 	int maxLevel = (entry->status & TexCacheEntry::STATUS_BAD_MIPS) ? 0 : entry->maxLevel;
-	SamplerCacheKey samplerKey = GetSamplingParams(maxLevel, entry->addr);
+	SamplerCacheKey samplerKey = GetSamplingParams(maxLevel, entry);
 	curSampler_ = samplerCache_.GetOrCreateSampler(samplerKey);
 	drawEngine_->SetDepalTexture(VK_NULL_HANDLE);
 	gstate_c.SetUseShaderDepal(false);
@@ -762,6 +753,8 @@ void TextureCacheVulkan::BuildTexture(TexCacheEntry *const entry) {
 	VkFormat dstFmt = GetDestFormat(GETextureFormat(entry->format), gstate.getClutPaletteFormat());
 
 	int scaleFactor = standardScaleFactor_;
+	if (scaleFactor > maxScaleFactor_)
+		scaleFactor = maxScaleFactor_;
 
 	// Rachet down scale factor in low-memory mode.
 	if (lowMemoryMode_) {
@@ -859,7 +852,7 @@ void TextureCacheVulkan::BuildTexture(TexCacheEntry *const entry) {
 		}
 
 		char texName[128]{};
-		snprintf(texName, sizeof(texName), "texture_%08x_%s", entry->addr, GeTextureFormatToString((GETextureFormat)entry->format));
+		snprintf(texName, sizeof(texName), "tex_%08x_%s", entry->addr, GeTextureFormatToString((GETextureFormat)entry->format, gstate.getClutPaletteFormat()));
 		image->SetTag(texName);
 
 		bool allocSuccess = image->CreateDirect(cmdInit, allocator_, w * scaleFactor, h * scaleFactor, maxLevelToGenerate + 1, actualFmt, imageLayout, usage, mapping);
@@ -896,7 +889,7 @@ void TextureCacheVulkan::BuildTexture(TexCacheEntry *const entry) {
 		replacedInfo.cachekey = cachekey;
 		replacedInfo.hash = entry->fullhash;
 		replacedInfo.addr = entry->addr;
-		replacedInfo.isVideo = videos_.find(entry->addr & 0x3FFFFFFF) != videos_.end();
+		replacedInfo.isVideo = IsVideo(entry->addr);
 		replacedInfo.isFinal = (entry->status & TexCacheEntry::STATUS_TO_SCALE) == 0;
 		replacedInfo.scaleFactor = scaleFactor;
 		replacedInfo.fmt = FromVulkanFormat(actualFmt);
@@ -926,6 +919,7 @@ void TextureCacheVulkan::BuildTexture(TexCacheEntry *const entry) {
 			void *data;
 			bool dataScaled = true;
 			if (replaced.Valid()) {
+				// Directly load the replaced image.
 				data = drawEngine_->GetPushBufferForTextureData()->PushAligned(size, &bufferOffset, &texBuf, pushAlignment);
 				replaced.Load(i, data, stride);
 				entry->vkTex->UploadMip(cmdInit, i, mipWidth, mipHeight, texBuf, bufferOffset, stride / bpp);
@@ -1006,7 +1000,7 @@ void TextureCacheVulkan::BuildTexture(TexCacheEntry *const entry) {
 
 		// Generate any additional mipmap levels.
 		for (int level = maxLevel + 1; level <= maxLevelToGenerate; level++) {
-			entry->vkTex->GenerateMip(cmdInit, level);
+			entry->vkTex->GenerateMip(cmdInit, level, computeUpload ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 		}
 
 		if (maxLevel == 0) {
@@ -1068,7 +1062,6 @@ TexCacheEntry::TexStatus TextureCacheVulkan::CheckAlpha(const u32 *pixelData, Vk
 }
 
 void TextureCacheVulkan::LoadTextureLevel(TexCacheEntry &entry, uint8_t *writePtr, int rowPitch, int level, int scaleFactor, VkFormat dstFmt) {
-	VulkanTexture *tex = entry.vkTex;
 	int w = gstate.getTextureWidth(level);
 	int h = gstate.getTextureHeight(level);
 

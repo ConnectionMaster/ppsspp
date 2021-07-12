@@ -39,13 +39,15 @@ size_t MemArena::roundup(size_t x) {
 	return x;
 }
 
-void MemArena::GrabLowMemSpace(size_t size) {
+bool MemArena::GrabMemSpace(size_t size) {
 	vm_size = size;
 	kern_return_t retval = vm_allocate(mach_task_self(), &vm_mem, size, VM_FLAGS_ANYWHERE);
 	if (retval != KERN_SUCCESS) {
 		ERROR_LOG(MEMMAP, "Failed to grab a block of virtual memory");
+		return false;
 	} else {
 		INFO_LOG(MEMMAP, "Successfully allocated %d bytes at %p", (int)size, (void *)vm_mem);
+		return true;
 	}
 }
 
@@ -84,7 +86,7 @@ void MemArena::ReleaseView(void* view, size_t size) {
 }
 
 bool MemArena::NeedsProbing() {
-#if defined(IOS) && PPSSPP_ARCH(64BIT)
+#if PPSSPP_PLATFORM(IOS) && PPSSPP_ARCH(64BIT)
 	return true;
 #else
 	return false;
@@ -92,7 +94,7 @@ bool MemArena::NeedsProbing() {
 }
 
 u8* MemArena::Find4GBBase() {
-#if defined(IOS) && PPSSPP_ARCH(64BIT)
+#if PPSSPP_PLATFORM(IOS) && PPSSPP_ARCH(64BIT)
 	// The caller will need to do probing, like on 32-bit Windows.
 	return nullptr;
 #else

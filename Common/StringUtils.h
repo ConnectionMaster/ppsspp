@@ -23,7 +23,6 @@
 #include <vector>
 
 #ifdef _MSC_VER
-#pragma warning (disable:4996)
 #define strncasecmp _strnicmp
 #define strcasecmp _stricmp
 #else
@@ -32,6 +31,7 @@
 
 // Useful for shaders with error messages..
 std::string LineNumberString(const std::string &str);
+std::string IndentString(const std::string &str, const std::string &sep, bool skipFirst = false);
 
 // Other simple string utilities.
 
@@ -62,7 +62,7 @@ inline bool endsWithNoCase(const std::string &str, const std::string &what) {
 }
 
 void DataToHexString(const uint8_t *data, size_t size, std::string *output);
-void DataToHexString(const char* prefix, uint32_t startAddr, const uint8_t* data, size_t size, std::string* output);
+void DataToHexString(int indent, uint32_t startAddr, const uint8_t* data, size_t size, std::string* output);
 
 std::string StringFromFormat(const char* format, ...);
 std::string StringFromInt(int value);
@@ -101,5 +101,3 @@ inline void CharArrayFromFormat(char (& out)[Count], const char* format, ...)
 
 // "C:/Windows/winhelp.exe" to "C:/Windows/", "winhelp", ".exe"
 bool SplitPath(const std::string& full_path, std::string* _pPath, std::string* _pFilename, std::string* _pExtension);
-
-std::string GetFilenameFromPath(std::string full_path);

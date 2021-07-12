@@ -1006,6 +1006,7 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">true</ExcludedFromBuild>
     </ClInclude>
+    <ClInclude Include="..\android\jni\AndroidContentURI.h" />
     <ClInclude Include="..\android\jni\AndroidVulkanContext.h">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
@@ -1685,6 +1686,9 @@
     </ProjectReference>
     <ProjectReference Include="..\ext\libkirk\libkirk.vcxproj">
       <Project>{3baae095-e0ab-4b0e-b5df-ce39c8ae31de}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\ext\libzstd.vcxproj">
+      <Project>{8bfd8150-94d5-4bf9-8a50-7bd9929a0850}</Project>
     </ProjectReference>
     <ProjectReference Include="..\GPU\GPU.vcxproj">
       <Project>{457f45d2-556f-47bc-a31d-aff0d15beaed}</Project>

@@ -124,25 +124,26 @@ bool ManagedTexture::LoadFromFileData(const uint8_t *data, size_t dataSize, Imag
 	}
 
 	int potentialLevels = std::min(log2i(width[0]), log2i(height[0]));
-
-	TextureDesc desc{};
-	desc.type = TextureType::LINEAR2D;
-	desc.format = fmt;
-	desc.width = width[0];
-	desc.height = height[0];
-	desc.depth = 1;
-	desc.mipLevels = generateMips ? potentialLevels : num_levels;
-	desc.generateMips = generateMips && potentialLevels > num_levels;
-	desc.tag = name;
-	for (int i = 0; i < num_levels; i++) {
-		desc.initData.push_back(image[i]);
+	if (width[0] > 0 && height[0] > 0) {
+		TextureDesc desc{};
+		desc.type = TextureType::LINEAR2D;
+		desc.format = fmt;
+		desc.width = width[0];
+		desc.height = height[0];
+		desc.depth = 1;
+		desc.mipLevels = generateMips ? potentialLevels : num_levels;
+		desc.generateMips = generateMips && potentialLevels > num_levels;
+		desc.tag = name;
+		for (int i = 0; i < num_levels; i++) {
+			desc.initData.push_back(image[i]);
+		}
+		texture_ = draw_->CreateTexture(desc);
 	}
-	texture_ = draw_->CreateTexture(desc);
 	for (int i = 0; i < num_levels; i++) {
 		if (image[i])
 			free(image[i]);
 	}
-	return texture_;
+	return texture_ != nullptr;
 }
 
 bool ManagedTexture::LoadFromFile(const std::string &filename, ImageFileType type, bool generateMips) {
@@ -235,11 +236,9 @@ void GameIconView::Draw(UIContext &dc) {
 
 	// Fade icon with the backgrounds.
 	double loadTime = info->icon.timeLoaded;
-	if (info->pic1.texture) {
-		loadTime = std::max(loadTime, info->pic1.timeLoaded);
-	}
-	if (info->pic0.texture) {
-		loadTime = std::max(loadTime, info->pic0.timeLoaded);
+	auto pic = info->GetBGPic();
+	if (pic) {
+		loadTime = std::max(loadTime, pic->timeLoaded);
 	}
 	uint32_t color = whiteAlpha(ease((time_now_d() - loadTime) * 3));
 

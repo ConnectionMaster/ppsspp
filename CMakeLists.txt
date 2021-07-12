@@ -1,6 +1,7 @@
 # vim:noexpandtab:
 cmake_minimum_required(VERSION 3.6)
 project(PPSSPP)
+enable_testing()
 
 #This is supposed to work but doesn't!
 if(NOT ANDROID)
@@ -134,7 +135,8 @@ option(USE_MINIUPNPC "Build with miniUPnPc support" ON)
 option(USE_SYSTEM_SNAPPY "Dynamically link against system snappy" ${USE_SYSTEM_SNAPPY})
 option(USE_SYSTEM_FFMPEG "Dynamically link against system FFMPEG" ${USE_SYSTEM_FFMPEG})
 option(USE_SYSTEM_LIBZIP "Dynamically link against system libzip" ${USE_SYSTEM_LIBZIP})
-option(USE_ADDRESS_SANITIZER "Use Clang memory sanitizer" ${USE_ADDRESS_SANITIZER})
+option(USE_ASAN "Use address sanitizer" OFF)
+option(USE_UBSAN "Use undefined behaviour sanitizer" OFF)
 
 if(UNIX AND NOT (APPLE OR ANDROID) AND VULKAN)
 	if(USING_X11_VULKAN)
@@ -188,6 +190,9 @@ if(NOT OPENGL_LIBRARIES AND USING_GLES2)
 endif()
 
 if(NOT OPENGL_LIBRARIES)
+	if(POLICY CMP0072)
+		cmake_policy(SET CMP0072 NEW)
+	endif()
 	find_package(OpenGL REQUIRED)
 endif()
 
@@ -214,7 +219,7 @@ if(USING_EGL)
 	add_definitions(-DUSING_EGL)
 endif()
 if(USING_FBDEV)
-	add_definitions(-DUSING_FBDEV)
+	add_definitions(-DUSING_FBDEV -DEGL_NO_X11)
 endif()
 if(USING_GLES2)
 	add_definitions(-DUSING_GLES2)
@@ -265,6 +270,9 @@ foreach (LANGUAGE C CXX)
 endforeach()
 
 if(NOT MSVC)
+	# NEON optimizations in libpng17 seem to cause PNG load errors, see #14485.
+	add_definitions(-DPNG_ARM_NEON_OPT=0)
+
 	if(ANDROID)
 		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++11")
 	endif()
@@ -272,11 +280,24 @@ if(NOT MSVC)
 		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-switch -Wno-uninitialized")
 	endif()
 
-	if(USE_ADDRESS_SANITIZER)
+	if(USE_ASAN)
 		message("Address sanitizer enabled (DEBUG only)")
-		set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} -fsanitize=address")
+		set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address")
 		set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fsanitize=address")
-		add_definitions(-DUSE_ADDRESS_SANITIZER)
+		add_definitions(-DUSE_ASAN)
+	endif()
+	if(USE_UBSAN)
+		message("Undefined behaviour sanitizer enabled (DEBUG only)")
+		set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=undefined")
+		set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fsanitize=undefined")
+
+		# UBSAN is a collection of sanitizers, including vtpr, which reqiuires RTTI.
+		# ext/glslang disables RTTI by default using the `ENABLE_RTTI` option.
+		# If RTTI is disabled, we must also disable the vtpr sanitizer.
+		if(NOT ENABLE_RTTI)
+			set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fno-sanitize=vptr")
+			set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fno-sanitize=vptr")
+		endif()
 	endif()
 
 	set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -D_DEBUG")
@@ -287,12 +308,6 @@ if(NOT MSVC)
 	set(CMAKE_C_FLAGS_MINSIZEREL "${CMAKE_C_FLAGS_MINSIZEREL} -Os -D_NDEBUG")
 	set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O2 -D_NDEBUG")
 	set(CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO} -O2 -g -D_NDEBUG")
-	#TODO: Remove this and include the file properly everywhere it makes sense
-	# First step is too use the macros everywhere
-	# Second step is to remove the compatibility defines
-	# Third step is to include the file
-	# Fourth step is to remove that line!
-	add_compile_options(-include ${CMAKE_CURRENT_SOURCE_DIR}/ppsspp_config.h)
 
 	# Disable some warnings
 	add_definitions(-Wno-multichar)
@@ -388,7 +403,7 @@ set(CommonARM
 	Common/ArmCPUDetect.cpp
 	Common/ArmEmitter.h
 	Common/ArmEmitter.cpp
-	Common/ColorConvNEON.cpp
+	Common/Data/Convert/ColorConvNEON.cpp
 )
 source_group(ARM FILES ${CommonARM})
 
@@ -407,14 +422,6 @@ set(CommonMIPS
 	Common/MipsEmitter.h
 )
 source_group(MIPS FILES ${CommonMIPS})
-
-if(NOT (X86 OR ARM OR MIPS))
-	set(CommonFake
-		Common/FakeCPUDetect.cpp
-		Common/FakeEmitter.h
-	)
-	source_group(Fake FILES ${CommonFake})
-endif()
 
 if(WIN32)
 	set(CommonD3D
@@ -435,7 +442,6 @@ add_library(Common STATIC
 	${CommonARM}
 	${CommonARM64}
 	${CommonMIPS}
-	${CommonFake}
 	${CommonD3D}
 	Common/Serialize/Serializer.cpp
 	Common/Serialize/Serializer.h
@@ -457,6 +463,8 @@ add_library(Common STATIC
 	Common/Data/Collections/ThreadSafeList.h
 	Common/Data/Color/RGBAUtil.cpp
 	Common/Data/Color/RGBAUtil.h
+	Common/Data/Convert/ColorConv.cpp
+	Common/Data/Convert/ColorConv.h
 	Common/Data/Convert/SmallDataConvert.cpp
 	Common/Data/Convert/SmallDataConvert.h
 	Common/Data/Encoding/Base64.cpp
@@ -494,8 +502,12 @@ add_library(Common STATIC
 	Common/File/VFS/VFS.cpp
 	Common/File/VFS/AssetReader.cpp
 	Common/File/VFS/AssetReader.h
+	Common/File/AndroidStorage.h
+	Common/File/AndroidStorage.cpp
 	Common/File/DiskFree.h
 	Common/File/DiskFree.cpp
+	Common/File/Path.h
+	Common/File/Path.cpp
 	Common/File/PathBrowser.h
 	Common/File/PathBrowser.cpp
 	Common/File/FileUtil.cpp
@@ -570,6 +582,8 @@ add_library(Common STATIC
 	Common/Net/HTTPHeaders.h
 	Common/Net/HTTPServer.cpp
 	Common/Net/HTTPServer.h
+	Common/Net/NetBuffer.cpp
+	Common/Net/NetBuffer.h
 	Common/Net/Resolve.cpp
 	Common/Net/Resolve.h
 	Common/Net/Sinks.cpp
@@ -594,14 +608,14 @@ add_library(Common STATIC
 	Common/Render/Text/draw_text_uwp.h
 	Common/System/Display.cpp
 	Common/System/Display.h
-	Common/Thread/Executor.cpp
-	Common/Thread/Executor.h
-	Common/Thread/PrioritizedWorkQueue.cpp
-	Common/Thread/PrioritizedWorkQueue.h
+	Common/Thread/Channel.h
+	Common/Thread/ParallelLoop.cpp
+	Common/Thread/ParallelLoop.h
+	Common/Thread/Promise.h
 	Common/Thread/ThreadUtil.cpp
 	Common/Thread/ThreadUtil.h
-	Common/Thread/ThreadPool.cpp
-	Common/Thread/ThreadPool.h
+	Common/Thread/ThreadManager.cpp
+	Common/Thread/ThreadManager.h
 	Common/UI/Root.cpp
 	Common/UI/Root.h
 	Common/UI/Screen.cpp
@@ -623,8 +637,6 @@ add_library(Common STATIC
 	Common/Buffer.h
 	Common/Buffer.cpp
 	Common/CodeBlock.h
-	Common/ColorConv.cpp
-	Common/ColorConv.h
 	Common/Common.h
 	Common/CommonFuncs.h
 	Common/CommonTypes.h
@@ -632,12 +644,15 @@ add_library(Common STATIC
 	Common/ConsoleListener.h
 	Common/DbgNew.h
 	Common/FakeEmitter.h
+	Common/FakeCPUDetect.cpp
 	Common/ExceptionHandlerSetup.cpp
 	Common/ExceptionHandlerSetup.h
 	Common/Log.h
 	Common/Log.cpp
 	Common/LogManager.cpp
 	Common/LogManager.h
+	Common/LogReporting.cpp
+	Common/LogReporting.h
 	Common/MakeUnique.h
 	Common/MemArenaAndroid.cpp
 	Common/MemArenaDarwin.cpp
@@ -780,62 +795,135 @@ if(LIBZIP_FOUND AND USE_SYSTEM_LIBZIP)
 	add_definitions(-DSHARED_LIBZIP)
 else()
 	add_library(libzip STATIC
-		ext/libzip/zip.h
-		ext/libzip/mkstemp.c
 		ext/libzip/zip_add.c
 		ext/libzip/zip_add_dir.c
+		ext/libzip/zip_add_entry.c
+		ext/libzip/zip_algorithm_deflate.c
+		ext/libzip/zip_buffer.c
 		ext/libzip/zip_close.c
 		ext/libzip/zip_delete.c
+		ext/libzip/zip_dir_add.c
 		ext/libzip/zip_dirent.c
-		ext/libzip/zip_entry_free.c
-		ext/libzip/zip_entry_new.c
-		ext/libzip/zip_err_str.c
+		ext/libzip/zip_discard.c
+		ext/libzip/zip_entry.c
 		ext/libzip/zip_error.c
 		ext/libzip/zip_error_clear.c
 		ext/libzip/zip_error_get.c
 		ext/libzip/zip_error_get_sys_type.c
 		ext/libzip/zip_error_strerror.c
 		ext/libzip/zip_error_to_str.c
+		ext/libzip/zip_extra_field.c
+		ext/libzip/zip_extra_field_api.c
 		ext/libzip/zip_fclose.c
+		ext/libzip/zip_fdopen.c
+		ext/libzip/zip_file_add.c
 		ext/libzip/zip_file_error_clear.c
 		ext/libzip/zip_file_error_get.c
+		ext/libzip/zip_file_get_comment.c
+		ext/libzip/zip_file_get_external_attributes.c
 		ext/libzip/zip_file_get_offset.c
+		ext/libzip/zip_file_rename.c
+		ext/libzip/zip_file_replace.c
+		ext/libzip/zip_file_set_comment.c
+		ext/libzip/zip_file_set_encryption.c
+		ext/libzip/zip_file_set_external_attributes.c
+		ext/libzip/zip_file_set_mtime.c
 		ext/libzip/zip_file_strerror.c
-		ext/libzip/zip_filerange_crc.c
 		ext/libzip/zip_fopen.c
+		ext/libzip/zip_fopen_encrypted.c
 		ext/libzip/zip_fopen_index.c
+		ext/libzip/zip_fopen_index_encrypted.c
 		ext/libzip/zip_fread.c
-		ext/libzip/zip_free.c
+		ext/libzip/zip_fseek.c
+		ext/libzip/zip_ftell.c
 		ext/libzip/zip_get_archive_comment.c
 		ext/libzip/zip_get_archive_flag.c
+		ext/libzip/zip_get_encryption_implementation.c
 		ext/libzip/zip_get_file_comment.c
 		ext/libzip/zip_get_name.c
+		ext/libzip/zip_get_num_entries.c
 		ext/libzip/zip_get_num_files.c
+		ext/libzip/zip_hash.c
+		ext/libzip/zip_io_util.c
+		ext/libzip/zip_libzip_version.c
 		ext/libzip/zip_memdup.c
 		ext/libzip/zip_name_locate.c
 		ext/libzip/zip_new.c
 		ext/libzip/zip_open.c
+		ext/libzip/zip_pkware.c
+		ext/libzip/zip_progress.c
 		ext/libzip/zip_rename.c
 		ext/libzip/zip_replace.c
 		ext/libzip/zip_set_archive_comment.c
 		ext/libzip/zip_set_archive_flag.c
+		ext/libzip/zip_set_default_password.c
 		ext/libzip/zip_set_file_comment.c
+		ext/libzip/zip_set_file_compression.c
 		ext/libzip/zip_set_name.c
+		ext/libzip/zip_source_accept_empty.c
+		ext/libzip/zip_source_begin_write.c
+		ext/libzip/zip_source_begin_write_cloning.c
 		ext/libzip/zip_source_buffer.c
-		ext/libzip/zip_source_file.c
-		ext/libzip/zip_source_filep.c
+		ext/libzip/zip_source_call.c
+		ext/libzip/zip_source_close.c
+		ext/libzip/zip_source_commit_write.c
+		ext/libzip/zip_source_compress.c
+		ext/libzip/zip_source_crc.c
+		ext/libzip/zip_source_error.c
+		ext/libzip/zip_source_file_common.c
+		ext/libzip/zip_source_file_stdio.c
 		ext/libzip/zip_source_free.c
 		ext/libzip/zip_source_function.c
+		ext/libzip/zip_source_get_file_attributes.c
+		ext/libzip/zip_source_is_deleted.c
+		ext/libzip/zip_source_layered.c
+		ext/libzip/zip_source_open.c
+		ext/libzip/zip_source_pkware_decode.c
+		ext/libzip/zip_source_pkware_encode.c
+		ext/libzip/zip_source_read.c
+		ext/libzip/zip_source_remove.c
+		ext/libzip/zip_source_rollback_write.c
+		ext/libzip/zip_source_seek.c
+		ext/libzip/zip_source_seek_write.c
+		ext/libzip/zip_source_stat.c
+		ext/libzip/zip_source_supports.c
+		ext/libzip/zip_source_tell.c
+		ext/libzip/zip_source_tell_write.c
+		ext/libzip/zip_source_window.c
+		ext/libzip/zip_source_write.c
 		ext/libzip/zip_source_zip.c
+		ext/libzip/zip_source_zip_new.c
 		ext/libzip/zip_stat.c
 		ext/libzip/zip_stat_index.c
 		ext/libzip/zip_stat_init.c
 		ext/libzip/zip_strerror.c
+		ext/libzip/zip_string.c
 		ext/libzip/zip_unchange.c
 		ext/libzip/zip_unchange_all.c
 		ext/libzip/zip_unchange_archive.c
 		ext/libzip/zip_unchange_data.c
+		ext/libzip/zip_utf-8.c
+		ext/libzip/zip_err_str.c
 	)
+	if(WIN32)
+		target_sources(libzip PRIVATE
+			ext/libzip/zip_source_file_win32.c
+			ext/libzip/zip_source_file_win32_named.c
+			ext/libzip/zip_source_file_win32_utf16.c
+			ext/libzip/zip_source_file_win32_utf8.c
+		)
+		if(CMAKE_SYSTEM_NAME MATCHES WindowsPhone OR CMAKE_SYSTEM_NAME MATCHES WindowsStore)
+			target_sources(libzip PRIVATE ext/libzip/zip_random_uwp.c)
+		else()
+			target_sources(libzip PRIVATE ext/libzip/zip_source_file_win32_ansi.c ext/libzip/zip_random_win32.c)
+		endif()
+	else()
+		target_sources(libzip PRIVATE
+			ext/libzip/zip_mkstempm.c
+			ext/libzip/zip_source_file_stdio_named.c
+			ext/libzip/zip_random_unix.c
+		)
+	endif()
 	target_link_libraries(libzip)
 	include_directories(ext/libzip)
 	set(LIBZIP_LIBRARY libzip)
@@ -1046,34 +1134,65 @@ list(APPEND NativeAppSource
 	android/jni/TestRunner.cpp
 	UI/DiscordIntegration.cpp
 	UI/NativeApp.cpp
+	UI/BackgroundAudio.h
 	UI/BackgroundAudio.cpp
+	UI/ChatScreen.h
 	UI/ChatScreen.cpp
 	UI/DevScreens.cpp
+	UI/DevScreens.h
 	UI/DisplayLayoutEditor.cpp
+	UI/DisplayLayoutEditor.h
 	UI/DisplayLayoutScreen.cpp
+	UI/DisplayLayoutScreen.h
+	UI/EmuScreen.h
 	UI/EmuScreen.cpp
+	UI/GameInfoCache.h
 	UI/GameInfoCache.cpp
+	UI/MainScreen.h
 	UI/MainScreen.cpp
+	UI/MiscScreens.h
 	UI/MiscScreens.cpp
+	UI/PauseScreen.h
 	UI/PauseScreen.cpp
+	UI/GameScreen.h
 	UI/GameScreen.cpp
+	UI/GameSettingsScreen.h
 	UI/GameSettingsScreen.cpp
+	UI/GPUDriverTestScreen.h
 	UI/GPUDriverTestScreen.cpp
+	UI/TiltAnalogSettingsScreen.h
 	UI/TiltAnalogSettingsScreen.cpp
+	UI/TiltEventProcessor.h
 	UI/TiltEventProcessor.cpp
+	UI/TouchControlLayoutScreen.h
 	UI/TouchControlLayoutScreen.cpp
+	UI/TouchControlVisibilityScreen.h
 	UI/TouchControlVisibilityScreen.cpp
+	UI/GamepadEmu.h
 	UI/GamepadEmu.cpp
+	UI/OnScreenDisplay.h
 	UI/OnScreenDisplay.cpp
+	UI/ControlMappingScreen.h
 	UI/ControlMappingScreen.cpp
+	UI/RemoteISOScreen.h
 	UI/RemoteISOScreen.cpp
+	UI/ReportScreen.h
 	UI/ReportScreen.cpp
+	UI/SavedataScreen.h
 	UI/SavedataScreen.cpp
+	UI/Store.h
 	UI/Store.cpp
+	UI/CwCheatScreen.h
 	UI/CwCheatScreen.cpp
+	UI/InstallZipScreen.h
 	UI/InstallZipScreen.cpp
+	UI/MemStickScreen.h
+	UI/MemStickScreen.cpp
+	UI/ProfilerDraw.h
 	UI/ProfilerDraw.cpp
+	UI/TextureUtil.h
 	UI/TextureUtil.cpp
+	UI/ComboKeyMappingScreen.h
 	UI/ComboKeyMappingScreen.cpp
 )
 
@@ -1239,7 +1358,6 @@ list(APPEND CoreExtra
 list(APPEND CoreExtra
 	Core/MIPS/MIPS/MipsJit.cpp
 	Core/MIPS/MIPS/MipsJit.h
-	GPU/Common/VertexDecoderFake.cpp
 )
 
 if(NOT MOBILE_DEVICE)
@@ -1318,8 +1436,6 @@ set(GPU_D3D9
 	GPU/Directx9/TextureCacheDX9.h
 	GPU/Directx9/TextureScalerDX9.cpp
 	GPU/Directx9/TextureScalerDX9.h
-	GPU/Directx9/VertexShaderGeneratorHLSL.cpp
-	GPU/GLES/VertexShaderGeneratorGLES.h
 )
 
 set(GPU_D3D11
@@ -1449,6 +1565,8 @@ add_library(${CoreLibName} ${CoreLinkType}
 	Core/Config.cpp
 	Core/Config.h
 	Core/ConfigValues.h
+	Core/ControlMapper.cpp
+	Core/ControlMapper.h
 	Core/Core.cpp
 	Core/Core.h
 	Core/Compatibility.cpp
@@ -1470,6 +1588,8 @@ add_library(${CoreLibName} ${CoreLinkType}
 	Core/Debugger/Breakpoints.cpp
 	Core/Debugger/Breakpoints.h
 	Core/Debugger/DebugInterface.h
+	Core/Debugger/MemBlockInfo.cpp
+	Core/Debugger/MemBlockInfo.h
 	Core/Debugger/SymbolMap.cpp
 	Core/Debugger/SymbolMap.h
 	Core/Debugger/DisassemblyManager.cpp
@@ -1498,8 +1618,12 @@ add_library(${CoreLibName} ${CoreLinkType}
 	Core/Debugger/WebSocket/InputSubscriber.h
 	Core/Debugger/WebSocket/LogBroadcaster.cpp
 	Core/Debugger/WebSocket/LogBroadcaster.h
+	Core/Debugger/WebSocket/MemoryInfoSubscriber.cpp
+	Core/Debugger/WebSocket/MemoryInfoSubscriber.h
 	Core/Debugger/WebSocket/MemorySubscriber.cpp
 	Core/Debugger/WebSocket/MemorySubscriber.h
+	Core/Debugger/WebSocket/ReplaySubscriber.cpp
+	Core/Debugger/WebSocket/ReplaySubscriber.h
 	Core/Debugger/WebSocket/SteppingBroadcaster.cpp
 	Core/Debugger/WebSocket/SteppingBroadcaster.h
 	Core/Debugger/WebSocket/SteppingSubscriber.cpp
@@ -1812,14 +1936,19 @@ if(ANDROID)
 	endif()
 endif()
 
-set(CoreExtraLibs ${CoreExtraLibs} armips)
+set(CoreExtraLibs ${CoreExtraLibs} armips libzstd_static)
+include_directories(ext/zstd/lib)
 
 # needed for VK_USE_PLATFORM_XCB_KHR only
 #if(VULKAN AND NOT WIN32)
 #	target_link_libraries(native X11-xcb X11)
 #endif()
 
-set(GlslangLibs glslang OGLCompiler OSDependent SPIRV SPVRemapper spirv-cross-glsl)
+set(GlslangLibs glslang OGLCompiler OSDependent SPIRV spirv-cross-glsl)
+
+if (ENABLE_SPVREMAPPER)
+	list(APPEND GlslangLibs SPVRemapper)
+endif()
 
 if(WIN32)
 	set(GlslangLibs ${GlslangLibs} spirv-cross-hlsl)
@@ -1870,12 +1999,13 @@ if(USE_MINIUPNPC)
 		add_definitions(-fPIC)
 	endif()
 	
-	add_definitions(-DMINIUPNP_STATICLIB)
+	add_definitions(-DWITH_UPNP -DMINIUPNP_STATICLIB)
 	set(MINIUPNP_DIR "ext/miniupnp/miniupnpc")
 	include_directories(${CMAKE_CURRENT_BINARY_DIR})
 	configure_file(${MINIUPNP_DIR}/miniupnpcstrings.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/miniupnpcstrings.h) # by default miniupnp repo doesn't contains miniupnpcstrings.h and need to be generated
 	set(MINIUPNPC_SOURCES
         # the needed bits of miniupnpc (no python module, no tests, no cli)
+		${MINIUPNP_DIR}/addr_is_reserved.c
 		${MINIUPNP_DIR}/connecthostport.c
         ${MINIUPNP_DIR}/igd_desc_parse.c
         ${MINIUPNP_DIR}/minisoap.c
@@ -1898,9 +2028,7 @@ if(USE_MINIUPNPC)
 	endif()
 	if (WIN32)
 	  set_source_files_properties(${MINIUPNPC_SOURCES} PROPERTIES  COMPILE_DEFINITIONS "MINIUPNP_STATICLIB;MINIUPNP_EXPORTS")
-	  find_library(WINSOCK2_LIBRARY NAMES ws2_32 WS2_32 Ws2_32)
-	  find_library(IPHLPAPI_LIBRARY NAMES iphlpapi)
-	  set(LDLIBS ${WINSOCK2_LIBRARY} ${IPHLPAPI_LIBRARY} ${LDLIBS})
+	  set(LDLIBS ws2_32 iphlpapi ${LDLIBS})
 	#elseif (CMAKE_SYSTEM_NAME STREQUAL "Solaris")
 	#  find_library (SOCKET_LIBRARY NAMES socket)
 	#  find_library (NSL_LIBRARY NAMES nsl)
@@ -1956,7 +2084,6 @@ set(WindowsFiles
 	Windows/Debugger/CtrlMemView.h
 	Windows/Debugger/CtrlRegisterList.cpp
 	Windows/Debugger/CtrlRegisterList.h
-	Windows/Debugger/Debugger.h
 	Windows/Debugger/DebuggerShared.cpp
 	Windows/Debugger/DebuggerShared.h
 	Windows/Debugger/Debugger_Disasm.cpp
@@ -1965,8 +2092,6 @@ set(WindowsFiles
 	Windows/Debugger/Debugger_MemoryDlg.h
 	Windows/Debugger/Debugger_Lists.cpp
 	Windows/Debugger/Debugger_Lists.h
-	Windows/Debugger/Debugger_Misc.cpp
-	Windows/Debugger/Debugger_Misc.h
 	Windows/Debugger/Debugger_SymbolMap.h
 	Windows/Debugger/Debugger_VFPUDlg.cpp
 	Windows/Debugger/Debugger_VFPUDlg.h
@@ -2071,7 +2196,7 @@ set(NativeAssets
 
 
 if(HEADLESS)
-	add_executable(PPSSPPHeadless
+	set(HeadlessSource
 		headless/Headless.cpp
 		headless/StubHost.cpp
 		headless/StubHost.h
@@ -2080,6 +2205,25 @@ if(HEADLESS)
 		headless/SDLHeadlessHost.cpp
 		headless/SDLHeadlessHost.h
 	)
+	if(WIN32)
+		list(APPEND HeadlessSource
+			headless/WindowsHeadlessHost.cpp
+			headless/WindowsHeadlessHost.h
+			Windows/GPU/D3D9Context.cpp
+			Windows/GPU/D3D9Context.h
+			Windows/GPU/D3D11Context.cpp
+			Windows/GPU/D3D11Context.h
+			Windows/GPU/WindowsGLContext.cpp
+			Windows/GPU/WindowsVulkanContext.cpp
+			Windows/W32Util/ShellUtil.cpp
+			Windows/W32Util/ShellUtil.h
+			Windows/CaptureDevice.cpp
+			Windows/CaptureDevice.h
+			Windows/W32Util/Misc.cpp
+			Windows/W32Util/Misc.h
+		)
+	endif()
+	add_executable(PPSSPPHeadless ${HeadlessSource})
 	target_link_libraries(PPSSPPHeadless ${COCOA_LIBRARY} ${QUARTZ_CORE_LIBRARY} ${LinkCommon})
 	setup_target_project(PPSSPPHeadless headless)
 endif()
@@ -2087,16 +2231,33 @@ endif()
 if(UNITTEST)
 	add_executable(unitTest
 		unittest/UnitTest.cpp
+		unittest/TestShaderGenerators.cpp
 		unittest/TestArmEmitter.cpp
 		unittest/TestArm64Emitter.cpp
 		unittest/TestX64Emitter.cpp
 		unittest/TestVertexJit.cpp
+		unittest/TestThreadManager.cpp
 		unittest/JitHarness.cpp
 		Core/MIPS/ARM/ArmRegCache.cpp
 		Core/MIPS/ARM/ArmRegCacheFPU.cpp
 	)
 	target_link_libraries(unitTest ${COCOA_LIBRARY} ${QUARTZ_CORE_LIBRARY} ${LinkCommon} Common)
 	setup_target_project(unitTest unittest)
+	add_test(arm64_emitter unitTest Arm64Emitter)
+	add_test(arm_emitter unitTest ArmEmitter)
+	add_test(x64_emitter unitTest X64Emitter)
+	add_test(vertex_jit unitTest VertexJit)
+	add_test(asin unitTest Asin)
+	add_test(sincos unitTest SinCos)
+	add_test(vfpu_sincos unitTest VFPUSinCos)
+	add_test(math_util unitTest MathUtil)
+	add_test(parsers unitTest Parsers)
+	add_test(jit unitTest Jit)
+	add_test(matrix_transpose unitTest MatrixTranspose)
+	add_test(parse_lbn unitTest ParseLBN)
+	add_test(quick_texhash unitTest QuickTexHash)
+	add_test(clz unitTest CLZ)
+	add_test(shadergen unitTest ShaderGenerators)
 endif()
 
 if(LIBRETRO)
@@ -2190,6 +2351,7 @@ if(IOS)
 		RESOURCE "ios/Settings.bundle"
 		RESOURCE "MoltenVK/iOS/Frameworks"
 		XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET ${DEPLOYMENT_TARGET}
+		XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "iPhone/iPad"
 		XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC YES
 		XCODE_ATTRIBUTE_ENABLE_BITCODE NO
 		XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "-"

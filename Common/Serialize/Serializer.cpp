@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <snappy-c.h>
+#include <zstd.h>
 
 #include "Common/Serialize/Serializer.h"
 #include "Common/Serialize/SerializeFuncs.h"
@@ -111,14 +112,22 @@ void Do(PointerWrap &p, std::string &x) {
 }
 
 void Do(PointerWrap &p, std::wstring &x) {
-	int stringLen = sizeof(wchar_t)*((int)x.length() + 1);
+	int stringLen = sizeof(wchar_t) * ((int)x.length() + 1);
 	Do(p, stringLen);
 
+	auto read = [&]() {
+		std::wstring r;
+		// In case unaligned, use memcpy.
+		r.resize((stringLen / sizeof(wchar_t)) - 1);
+		memcpy(&r[0], *p.ptr, stringLen - sizeof(wchar_t));
+		return r;
+	};
+
 	switch (p.mode) {
-	case PointerWrap::MODE_READ: x = (wchar_t*)*p.ptr; break;
+	case PointerWrap::MODE_READ: x = read(); break;
 	case PointerWrap::MODE_WRITE: memcpy(*p.ptr, x.c_str(), stringLen); break;
 	case PointerWrap::MODE_MEASURE: break;
-	case PointerWrap::MODE_VERIFY: _dbg_assert_msg_(x == (wchar_t*)*p.ptr, "Savestate verification failure: \"%ls\" != \"%ls\" (at %p).\n", x.c_str(), (wchar_t*)*p.ptr, p.ptr); break;
+	case PointerWrap::MODE_VERIFY: _dbg_assert_msg_(x == read(), "Savestate verification failure: \"%ls\" != \"%ls\" (at %p).\n", x.c_str(), read().c_str(), p.ptr); break;
 	}
 	(*p.ptr) += stringLen;
 }
@@ -127,11 +136,19 @@ void Do(PointerWrap &p, std::u16string &x) {
 	int stringLen = sizeof(char16_t) * ((int)x.length() + 1);
 	Do(p, stringLen);
 
+	auto read = [&]() {
+		std::u16string r;
+		// In case unaligned, use memcpy.
+		r.resize((stringLen / sizeof(char16_t)) - 1);
+		memcpy(&r[0], *p.ptr, stringLen - sizeof(char16_t));
+		return r;
+	};
+
 	switch (p.mode) {
-	case PointerWrap::MODE_READ: x = (char16_t*)*p.ptr; break;
+	case PointerWrap::MODE_READ: x = read(); break;
 	case PointerWrap::MODE_WRITE: memcpy(*p.ptr, x.c_str(), stringLen); break;
 	case PointerWrap::MODE_MEASURE: break;
-	case PointerWrap::MODE_VERIFY: _dbg_assert_msg_(x == (char16_t*)*p.ptr, "Savestate verification failure: (at %p).\n", x.c_str()); break;
+	case PointerWrap::MODE_VERIFY: _dbg_assert_msg_(x == read(), "Savestate verification failure: (at %p).\n", p.ptr); break;
 	}
 	(*p.ptr) += stringLen;
 }
@@ -174,7 +191,7 @@ void PointerWrap::DoMarker(const char *prevName, u32 arbitraryNumber) {
 	u32 cookie = arbitraryNumber;
 	Do(*this, cookie);
 	if (mode == PointerWrap::MODE_READ && cookie != arbitraryNumber) {
-		_assert_msg_(false, "Error: After \"%s\", found %d (0x%X) instead of save marker %d (0x%X). Aborting savestate load...", prevName, cookie, cookie, arbitraryNumber, arbitraryNumber);
+		ERROR_LOG(SAVESTATE, "Error: After \"%s\", found %d (0x%X) instead of save marker %d (0x%X). Aborting savestate load...", prevName, cookie, cookie, arbitraryNumber, arbitraryNumber);
 		SetError(ERROR_FAILURE);
 	}
 }
@@ -233,7 +250,7 @@ CChunkFileReader::Error CChunkFileReader::LoadFileHeader(File::IOFile &pFile, SC
 	return ERROR_NONE;
 }
 
-CChunkFileReader::Error CChunkFileReader::GetFileTitle(const std::string &filename, std::string *title) {
+CChunkFileReader::Error CChunkFileReader::GetFileTitle(const Path &filename, std::string *title) {
 	if (!File::Exists(filename)) {
 		ERROR_LOG(SAVESTATE, "ChunkReader: File doesn't exist");
 		return ERROR_BAD_FILE;
@@ -244,7 +261,7 @@ CChunkFileReader::Error CChunkFileReader::GetFileTitle(const std::string &filena
 	return LoadFileHeader(pFile, header, title);
 }
 
-CChunkFileReader::Error CChunkFileReader::LoadFile(const std::string &filename, std::string *gitVersion, u8 *&_buffer, size_t &sz, std::string *failureReason) {
+CChunkFileReader::Error CChunkFileReader::LoadFile(const Path &filename, std::string *gitVersion, u8 *&_buffer, size_t &sz, std::string *failureReason) {
 	if (!File::Exists(filename)) {
 		*failureReason = "LoadStateDoesntExist";
 		ERROR_LOG(SAVESTATE, "ChunkReader: File doesn't exist");
@@ -271,8 +288,15 @@ CChunkFileReader::Error CChunkFileReader::LoadFile(const std::string &filename, 
 	if (header.Compress) {
 		u8 *uncomp_buffer = new u8[header.UncompressedSize];
 		size_t uncomp_size = header.UncompressedSize;
-		auto status = snappy_uncompress((const char *)buffer, sz, (char *)uncomp_buffer, &uncomp_size);
-		if (status != SNAPPY_OK) {
+		bool success = false;
+		if (header.Compress == 1) {
+			auto status = snappy_uncompress((const char *)buffer, sz, (char *)uncomp_buffer, &uncomp_size);
+			success = status == SNAPPY_OK;
+		} else {
+			auto status = ZSTD_decompress((char *)uncomp_buffer, uncomp_size, (const char *)buffer, sz);
+			success = !ZSTD_isError(status);
+		}
+		if (!success) {
 			ERROR_LOG(SAVESTATE, "ChunkReader: Failed to decompress file");
 			delete [] uncomp_buffer;
 			delete [] buffer;
@@ -301,7 +325,7 @@ CChunkFileReader::Error CChunkFileReader::LoadFile(const std::string &filename, 
 }
 
 // Takes ownership of buffer.
-CChunkFileReader::Error CChunkFileReader::SaveFile(const std::string &filename, const std::string &title, const char *gitVersion, u8 *buffer, size_t sz) {
+CChunkFileReader::Error CChunkFileReader::SaveFile(const Path &filename, const std::string &title, const char *gitVersion, u8 *buffer, size_t sz) {
 	INFO_LOG(SAVESTATE, "ChunkReader: Writing %s", filename.c_str());
 
 	File::IOFile pFile(filename, "wb");
@@ -312,7 +336,7 @@ CChunkFileReader::Error CChunkFileReader::SaveFile(const std::string &filename, 
 	}
 
 	// Make sure we can allocate a buffer to compress before compressing.
-	size_t write_len = snappy_max_compressed_length(sz);
+	size_t write_len = ZSTD_compressBound(sz);
 	u8 *compressed_buffer = (u8 *)malloc(write_len);
 	u8 *write_buffer = buffer;
 	if (!compressed_buffer) {
@@ -320,7 +344,8 @@ CChunkFileReader::Error CChunkFileReader::SaveFile(const std::string &filename, 
 		// We'll save uncompressed.  Better than not saving...
 		write_len = sz;
 	} else {
-		snappy_compress((const char *)buffer, sz, (char *)compressed_buffer, &write_len);
+		// TODO: If free disk space is low, we could max this out to 22?
+		write_len = ZSTD_compress(compressed_buffer, write_len, buffer, sz, 1);
 		free(buffer);
 
 		write_buffer = compressed_buffer;
@@ -328,7 +353,7 @@ CChunkFileReader::Error CChunkFileReader::SaveFile(const std::string &filename, 
 
 	// Create header
 	SChunkHeader header{};
-	header.Compress = compressed_buffer ? 1 : 0;
+	header.Compress = compressed_buffer ? 2 : 0;
 	header.Revision = REVISION_CURRENT;
 	header.ExpectedSize = (u32)write_len;
 	header.UncompressedSize = (u32)sz;

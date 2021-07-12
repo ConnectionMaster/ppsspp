@@ -22,6 +22,7 @@
 #include "Common/UI/UIScreen.h"
 #include "Common/UI/ViewGroup.h"
 #include "UI/MiscScreens.h"
+#include "Common/File/Path.h"
 
 enum class ReportingOverallScore : int {
 	PERFECT = 0,
@@ -34,7 +35,7 @@ enum class ReportingOverallScore : int {
 
 class ReportScreen : public UIDialogScreenWithGameBackground {
 public:
-	ReportScreen(const std::string &gamePath);
+	ReportScreen(const Path &gamePath);
 
 protected:
 	void postRender() override;
@@ -42,18 +43,22 @@ protected:
 	void resized() override;
 	void CreateViews() override;
 	void UpdateSubmit();
+	void UpdateCRCInfo();
 	void UpdateOverallDescription();
 
 	UI::EventReturn HandleChoice(UI::EventParams &e);
 	UI::EventReturn HandleSubmit(UI::EventParams &e);
 	UI::EventReturn HandleBrowser(UI::EventParams &e);
+	UI::EventReturn HandleShowCRC(UI::EventParams &e);
 	UI::EventReturn HandleReportingChange(UI::EventParams &e);
 
 	UI::Choice *submit_ = nullptr;
 	UI::View *screenshot_ = nullptr;
 	UI::TextView *reportingNotice_ = nullptr;
 	UI::TextView *overallDescription_ = nullptr;
-	std::string screenshotFilename_;
+	UI::TextView *crcInfo_ = nullptr;
+	UI::Choice *showCrcButton_ = nullptr;
+	Path screenshotFilename_;
 
 	ReportingOverallScore overall_ = ReportingOverallScore::INVALID;
 	int graphics_ = -1;
@@ -63,11 +68,12 @@ protected:
 	bool ratingEnabled_;
 	bool tookScreenshot_ = false;
 	bool includeScreenshot_ = true;
+	bool showCRC_ = false;
 };
 
 class ReportFinishScreen : public UIDialogScreenWithGameBackground {
 public:
-	ReportFinishScreen(const std::string &gamePath, ReportingOverallScore score);
+	ReportFinishScreen(const Path &gamePath, ReportingOverallScore score);
 
 protected:
 	void update() override;

@@ -16,8 +16,16 @@
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
 #include "ppsspp_config.h"
+#ifdef __MINGW32__
+#include <unistd.h>
+#ifndef _POSIX_THREAD_SAFE_FUNCTIONS
+#define _POSIX_THREAD_SAFE_FUNCTIONS 200112L
+#endif
+#endif
+#include <ctime>
 
 #include "Common/File/FileUtil.h"
+#include "Common/File/DirListing.h"
 #include "Common/StringUtils.h"
 #include "Common/Serialize/Serializer.h"
 #include "Common/Serialize/SerializeFuncs.h"
@@ -42,17 +50,8 @@
 
 const std::string INDEX_FILENAME = ".ppsspp-index.lst";
 
-VirtualDiscFileSystem::VirtualDiscFileSystem(IHandleAllocator *_hAlloc, std::string _basePath)
-	: basePath(_basePath),currentBlockIndex(0) {
-
-#ifdef _WIN32
-		if (!endsWith(basePath, "\\") && !endsWith(basePath, "/"))
-			basePath = basePath + "\\";
-#else
-		if (!endsWith(basePath, "/"))
-			basePath = basePath + "/";
-#endif
-
+VirtualDiscFileSystem::VirtualDiscFileSystem(IHandleAllocator *_hAlloc, const Path &_basePath)
+	: basePath(_basePath), currentBlockIndex(0) {
 	hAlloc = _hAlloc;
 	LoadFileListIndex();
 }
@@ -69,24 +68,24 @@ VirtualDiscFileSystem::~VirtualDiscFileSystem() {
 }
 
 void VirtualDiscFileSystem::LoadFileListIndex() {
-	const std::string filename = basePath + INDEX_FILENAME;
+	const Path filename = basePath / INDEX_FILENAME;
 	if (!File::Exists(filename)) {
 		return;
 	}
 
-	std::ifstream in;
-	in.open(filename.c_str(), std::ios::in);
-	if (in.fail()) {
+	FILE *f = File::OpenCFile(filename, "r");
+	if (!f) {
 		return;
 	}
 
 	std::string buf;
-	static const int MAX_LINE_SIZE = 1024;
-	while (!in.eof()) {
-		buf.resize(MAX_LINE_SIZE, '\0');
-		in.getline(&buf[0], MAX_LINE_SIZE);
-
-		std::string line = buf.data();
+	static const int MAX_LINE_SIZE = 2048;
+	char linebuf[MAX_LINE_SIZE]{};
+	while (fgets(linebuf, MAX_LINE_SIZE, f)) {
+		std::string line = linebuf;
+		// Strip newline from fgets.
+		if (!line.empty() && line.back() == '\n')
+			line.resize(line.size() - 1);
 
 		// Ignore any UTF-8 BOM.
 		if (line.substr(0, 3) == "\xEF\xBB\xBF") {
@@ -136,7 +135,7 @@ void VirtualDiscFileSystem::LoadFileListIndex() {
 		entry.firstBlock = strtol(line.c_str(), NULL, 16);
 		if (entry.handler != NULL && entry.handler->IsValid()) {
 			HandlerFileHandle temp = entry.handler;
-			if (temp.Open(basePath, entry.fileName, FILEACCESS_READ)) {
+			if (temp.Open(basePath.ToString(), entry.fileName, FILEACCESS_READ)) {
 				entry.totalSize = (u32)temp.Seek(0, FILEMOVE_END);
 				temp.Close();
 			} else {
@@ -155,7 +154,7 @@ void VirtualDiscFileSystem::LoadFileListIndex() {
 		fileList.push_back(entry);
 	}
 
-	in.close();
+	fclose(f);
 }
 
 void VirtualDiscFileSystem::DoState(PointerWrap &p)
@@ -240,7 +239,7 @@ void VirtualDiscFileSystem::DoState(PointerWrap &p)
 	// We don't savestate handlers (loaded on fs load), but if they change, it may not load properly.
 }
 
-std::string VirtualDiscFileSystem::GetLocalPath(std::string localpath) {
+Path VirtualDiscFileSystem::GetLocalPath(std::string localpath) {
 	if (localpath.empty())
 		return basePath;
 
@@ -253,7 +252,7 @@ std::string VirtualDiscFileSystem::GetLocalPath(std::string localpath) {
 			localpath[i] = '\\';
 	}
 #endif
-	return basePath + localpath;
+	return basePath / localpath;
 }
 
 int VirtualDiscFileSystem::getFileListIndex(std::string &fileName)
@@ -272,10 +271,10 @@ int VirtualDiscFileSystem::getFileListIndex(std::string &fileName)
 	}
 
 	// unknown file - add it
-	std::string fullName = GetLocalPath(fileName);
+	Path fullName = GetLocalPath(fileName);
 	if (! File::Exists(fullName)) {
 #if HOST_IS_CASE_SENSITIVE
-		if (! FixPathCase(basePath,fileName, FPC_FILE_MUST_EXIST))
+		if (! FixPathCase(basePath.ToString(), fileName, FPC_FILE_MUST_EXIST))
 			return -1;
 		fullName = GetLocalPath(fileName);
 
@@ -286,8 +285,7 @@ int VirtualDiscFileSystem::getFileListIndex(std::string &fileName)
 #endif
 	}
 
-	FileType type = File::IsDirectory(fullName) ? FILETYPE_DIRECTORY : FILETYPE_NORMAL;
-	if (type == FILETYPE_DIRECTORY)
+	if (File::IsDirectory(fullName))
 		return -1;
 
 	FileListEntry entry = {""};
@@ -365,7 +363,7 @@ int VirtualDiscFileSystem::OpenFile(std::string filename, FileAccess access, con
 
 		if (!success) {
 #ifdef _WIN32
-			ERROR_LOG(FILESYS, "VirtualDiscFileSystem::OpenFile: FAILED, %i", GetLastError());
+			ERROR_LOG(FILESYS, "VirtualDiscFileSystem::OpenFile: FAILED, %i", (int)GetLastError());
 #else
 			ERROR_LOG(FILESYS, "VirtualDiscFileSystem::OpenFile: FAILED");
 #endif
@@ -391,7 +389,7 @@ int VirtualDiscFileSystem::OpenFile(std::string filename, FileAccess access, con
 
 	if (!success) {
 #ifdef _WIN32
-		ERROR_LOG(FILESYS, "VirtualDiscFileSystem::OpenFile: FAILED, %i - access = %i", GetLastError(), (int)access);
+		ERROR_LOG(FILESYS, "VirtualDiscFileSystem::OpenFile: FAILED, %i - access = %i", (int)GetLastError(), (int)access);
 #else
 		ERROR_LOG(FILESYS, "VirtualDiscFileSystem::OpenFile: FAILED, access = %i", (int)access);
 #endif
@@ -554,6 +552,8 @@ int VirtualDiscFileSystem::Ioctl(u32 handle, u32 cmd, u32 indataPtr, u32 inlen, 
 
 PSPDevType VirtualDiscFileSystem::DevType(u32 handle) {
 	EntryMap::iterator iter = entries.find(handle);
+	if (iter == entries.end())
+		return PSPDevType::FILE;
 	PSPDevType type = iter->second.type == VFILETYPE_ISO ? PSPDevType::BLOCK : PSPDevType::FILE;
 	if (iter->second.type == VFILETYPE_LBN)
 		type |= PSPDevType::EMU_LBN;
@@ -589,7 +589,7 @@ PSPFileInfo VirtualDiscFileSystem::GetFileInfo(std::string filename) {
 		x.access = 0555;
 
 		HandlerFileHandle temp = fileList[fileIndex].handler;
-		if (temp.Open(basePath, filename, FILEACCESS_READ)) {
+		if (temp.Open(basePath.ToString(), filename, FILEACCESS_READ)) {
 			x.exists = true;
 			x.size = temp.Seek(0, FILEMOVE_END);
 			temp.Close();
@@ -599,10 +599,10 @@ PSPFileInfo VirtualDiscFileSystem::GetFileInfo(std::string filename) {
 		return x;
 	}
 
-	std::string fullName = GetLocalPath(filename);
-	if (! File::Exists(fullName)) {
+	Path fullName = GetLocalPath(filename);
+	if (!File::Exists(fullName)) {
 #if HOST_IS_CASE_SENSITIVE
-		if (! FixPathCase(basePath,filename, FPC_FILE_MUST_EXIST))
+		if (! FixPathCase(basePath.ToString(), filename, FPC_FILE_MUST_EXIST))
 			return x;
 		fullName = GetLocalPath(filename);
 
@@ -622,9 +622,9 @@ PSPFileInfo VirtualDiscFileSystem::GetFileInfo(std::string filename) {
 	}
 
 	if (x.type != FILETYPE_DIRECTORY) {
-		File::FileDetails details;
-		if (!File::GetFileDetails(fullName, &details)) {
-			ERROR_LOG(FILESYS, "DirectoryFileSystem::GetFileInfo: GetFileDetails failed: %s", fullName.c_str());
+		File::FileInfo details;
+		if (!File::GetFileInfo(fullName, &details)) {
+			ERROR_LOG(FILESYS, "DirectoryFileSystem::GetFileInfo: GetFileInfo failed: %s", fullName.c_str());
 			x.size = 0;
 			x.access = 0;
 		} else {
@@ -643,12 +643,6 @@ PSPFileInfo VirtualDiscFileSystem::GetFileInfo(std::string filename) {
 	}
 
 	return x;
-}
-
-bool VirtualDiscFileSystem::GetHostPath(const std::string &inpath, std::string &outpath)
-{
-	ERROR_LOG(FILESYS,"VirtualDiscFileSystem: Retrieving host path");
-	return false;
 }
 
 #ifdef _WIN32
@@ -673,9 +667,9 @@ std::vector<PSPFileInfo> VirtualDiscFileSystem::GetDirListing(std::string path)
 
 	// TODO: Handler files that are virtual might not be listed.
 
-	std::string w32path = GetLocalPath(path) + "\\*.*";
+	std::wstring w32path = GetLocalPath(path).ToWString() + L"\\*.*";
 
-	hFind = FindFirstFileEx(ConvertUTF8ToWString(w32path).c_str(), FindExInfoStandard, &findData, FindExSearchNameMatch, NULL, 0);
+	hFind = FindFirstFileEx(w32path.c_str(), FindExInfoStandard, &findData, FindExSearchNameMatch, NULL, 0);
 
 	if (hFind == INVALID_HANDLE_VALUE) {
 		return myVector; //the empty list
@@ -710,11 +704,11 @@ std::vector<PSPFileInfo> VirtualDiscFileSystem::GetDirListing(std::string path)
 	FindClose(hFind);
 #else
 	dirent *dirp;
-	std::string localPath = GetLocalPath(path);
+	Path localPath = GetLocalPath(path);
 	DIR *dp = opendir(localPath.c_str());
 
 #if HOST_IS_CASE_SENSITIVE
-	if(dp == NULL && FixPathCase(basePath,path, FPC_FILE_MUST_EXIST)) {
+	if(dp == NULL && FixPathCase(basePath.ToString(), path, FPC_FILE_MUST_EXIST)) {
 		// May have failed due to case sensitivity, try again
 		localPath = GetLocalPath(path);
 		dp = opendir(localPath.c_str());
@@ -733,7 +727,7 @@ std::vector<PSPFileInfo> VirtualDiscFileSystem::GetDirListing(std::string path)
 
 		PSPFileInfo entry;
 		struct stat s;
-		std::string fullName = GetLocalPath(path) + "/"+dirp->d_name;
+		std::string fullName = (GetLocalPath(path) / std::string(dirp->d_name)).ToString();
 		stat(fullName.c_str(), &s);
 		if (S_ISDIR(s.st_mode))
 			entry.type = FILETYPE_DIRECTORY;

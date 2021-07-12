@@ -1,13 +1,14 @@
+#include <atomic>
 #include <mutex>
 #include <deque>
 
 #include "ppsspp_config.h"
 
-#include "Common/UI/Root.h"
-#include "Common/UI/ViewGroup.h"
-
+#include "Common/Input/InputState.h"
 #include "Common/Log.h"
 #include "Common/TimeUtil.h"
+#include "Common/UI/Root.h"
+#include "Common/UI/ViewGroup.h"
 
 namespace UI {
 
@@ -29,6 +30,7 @@ struct DispatchQueueItem {
 	EventParams params;
 };
 
+std::atomic<bool> hasDispatchQueue;
 std::deque<DispatchQueueItem> g_dispatchQueue;
 
 void EventTriggered(Event *e, EventParams params) {
@@ -37,11 +39,13 @@ void EventTriggered(Event *e, EventParams params) {
 	item.params = params;
 
 	std::unique_lock<std::mutex> guard(eventMutex_);
+	// Set before adding so we lock and check the added value.
+	hasDispatchQueue = true;
 	g_dispatchQueue.push_front(item);
 }
 
 void DispatchEvents() {
-	while (true) {
+	while (hasDispatchQueue) {
 		DispatchQueueItem item;
 		{
 			std::unique_lock<std::mutex> guard(eventMutex_);
@@ -49,6 +53,7 @@ void DispatchEvents() {
 				break;
 			item = g_dispatchQueue.back();
 			g_dispatchQueue.pop_back();
+			hasDispatchQueue = !g_dispatchQueue.empty();
 		}
 		if (item.e) {
 			item.e->Dispatch(item.params);
@@ -57,6 +62,8 @@ void DispatchEvents() {
 }
 
 void RemoveQueuedEventsByView(View *view) {
+	if (!hasDispatchQueue)
+		return;
 	std::unique_lock<std::mutex> guard(eventMutex_);
 	for (auto it = g_dispatchQueue.begin(); it != g_dispatchQueue.end(); ) {
 		if (it->params.v == view) {
@@ -68,6 +75,8 @@ void RemoveQueuedEventsByView(View *view) {
 }
 
 void RemoveQueuedEventsByEvent(Event *event) {
+	if (!hasDispatchQueue)
+		return;
 	std::unique_lock<std::mutex> guard(eventMutex_);
 	for (auto it = g_dispatchQueue.begin(); it != g_dispatchQueue.end(); ) {
 		if (it->e == event) {
@@ -337,14 +346,21 @@ bool AxisEvent(const AxisInput &axis, ViewGroup *root) {
 			old.x = dir;
 		}
 		if (axis.axisId == JOYSTICK_AXIS_Y || axis.axisId == JOYSTICK_AXIS_HAT_Y) {
-			// We stupidly interpret the joystick Y axis backwards on Android and Linux instead of reversing
-			// it early (see keymaps...). Too late to fix without invalidating a lot of config files, so we
-			// reverse it here too.
+			int direction = GetAnalogYDirection(axis.deviceId);
+			if (direction == 0) {
+				// We stupidly interpret the joystick Y axis backwards on Android and Linux instead of reversing
+				// it early (see keymaps...). Too late to fix without invalidating a lot of config files, so we
+				// reverse it here too.
 #if PPSSPP_PLATFORM(ANDROID) || PPSSPP_PLATFORM(LINUX)
-			GenerateKeyFromAxis(old.y, dir, NKCODE_DPAD_UP, NKCODE_DPAD_DOWN);
+				GenerateKeyFromAxis(old.y, dir, NKCODE_DPAD_UP, NKCODE_DPAD_DOWN);
 #else
-			GenerateKeyFromAxis(old.y, dir, NKCODE_DPAD_DOWN, NKCODE_DPAD_UP);
+				GenerateKeyFromAxis(old.y, dir, NKCODE_DPAD_DOWN, NKCODE_DPAD_UP);
 #endif
+			} else if (direction == -1) {
+				GenerateKeyFromAxis(old.y, dir, NKCODE_DPAD_UP, NKCODE_DPAD_DOWN);
+			} else {
+				GenerateKeyFromAxis(old.y, dir, NKCODE_DPAD_DOWN, NKCODE_DPAD_UP);
+			}
 			old.y = dir;
 		}
 		break;

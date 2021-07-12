@@ -16,7 +16,6 @@ ARCH_FILES := \
   $(SRC)/Common/ABI.cpp \
   $(SRC)/Common/x64Emitter.cpp \
   $(SRC)/Common/x64Analyzer.cpp \
-  $(SRC)/Common/CPUDetect.cpp \
   $(SRC)/Common/Math/fast/fast_matrix_sse.c \
   $(SRC)/Common/Thunk.cpp \
   $(SRC)/Core/MIPS/x86/CompALU.cpp \
@@ -39,7 +38,6 @@ ARCH_FILES := \
   $(SRC)/Common/ABI.cpp \
   $(SRC)/Common/x64Emitter.cpp \
   $(SRC)/Common/x64Analyzer.cpp \
-  $(SRC)/Common/CPUDetect.cpp \
   $(SRC)/Common/Math/fast/fast_matrix_sse.c \
   $(SRC)/Common/Thunk.cpp \
   $(SRC)/Core/MIPS/x86/CompALU.cpp \
@@ -62,8 +60,7 @@ ARCH_FILES := \
   $(SRC)/GPU/Common/TextureDecoderNEON.cpp.neon \
   $(SRC)/Core/Util/AudioFormatNEON.cpp.neon \
   $(SRC)/Common/ArmEmitter.cpp \
-  $(SRC)/Common/ArmCPUDetect.cpp \
-  $(SRC)/Common/ColorConvNEON.cpp.neon \
+  $(SRC)/Common/Data/Convert/ColorConvNEON.cpp.neon \
   $(SRC)/Common/Math/fast/fast_matrix_neon.S.neon \
   $(SRC)/Core/MIPS/ARM/ArmCompALU.cpp \
   $(SRC)/Core/MIPS/ARM/ArmCompBranch.cpp \
@@ -90,8 +87,7 @@ ARCH_FILES := \
   $(SRC)/GPU/Common/TextureDecoderNEON.cpp \
   $(SRC)/Core/Util/AudioFormatNEON.cpp \
   $(SRC)/Common/Arm64Emitter.cpp \
-  $(SRC)/Common/ArmCPUDetect.cpp \
-  $(SRC)/Common/ColorConvNEON.cpp \
+  $(SRC)/Common/Data/Convert/ColorConvNEON.cpp \
   $(SRC)/Core/MIPS/ARM64/Arm64CompALU.cpp \
   $(SRC)/Core/MIPS/ARM64/Arm64CompBranch.cpp \
   $(SRC)/Core/MIPS/ARM64/Arm64CompFPU.cpp \
@@ -104,6 +100,8 @@ ARCH_FILES := \
   $(SRC)/Core/MIPS/ARM64/Arm64RegCacheFPU.cpp \
   $(SRC)/Core/Util/DisArm64.cpp \
   $(SRC)/GPU/Common/VertexDecoderArm64.cpp \
+  $(SRC)/ext/libpng17/arm/arm_init.c \
+  $(SRC)/ext/libpng17/arm/filter_neon_intrinsics.c \
   Arm64EmitterTest.cpp
 endif
 
@@ -232,6 +230,7 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Common/Crypto/sha1.cpp \
   $(SRC)/Common/Crypto/sha256.cpp \
   $(SRC)/Common/Data/Color/RGBAUtil.cpp \
+  $(SRC)/Common/Data/Convert/ColorConv.cpp \
   $(SRC)/Common/Data/Convert/SmallDataConvert.cpp \
   $(SRC)/Common/Data/Encoding/Base64.cpp \
   $(SRC)/Common/Data/Encoding/Compression.cpp \
@@ -250,9 +249,11 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Common/Data/Text/I18n.cpp \
   $(SRC)/Common/Data/Text/Parsers.cpp \
   $(SRC)/Common/Data/Text/WrapText.cpp \
+  $(SRC)/Common/File/AndroidStorage.cpp \
   $(SRC)/Common/File/VFS/VFS.cpp \
   $(SRC)/Common/File/VFS/AssetReader.cpp \
   $(SRC)/Common/File/DiskFree.cpp \
+  $(SRC)/Common/File/Path.cpp \
   $(SRC)/Common/File/PathBrowser.cpp \
   $(SRC)/Common/File/FileUtil.cpp \
   $(SRC)/Common/File/DirListing.cpp \
@@ -277,16 +278,16 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Common/Net/HTTPClient.cpp \
   $(SRC)/Common/Net/HTTPHeaders.cpp \
   $(SRC)/Common/Net/HTTPServer.cpp \
+  $(SRC)/Common/Net/NetBuffer.cpp \
   $(SRC)/Common/Net/Resolve.cpp \
   $(SRC)/Common/Net/Sinks.cpp \
   $(SRC)/Common/Net/URL.cpp \
   $(SRC)/Common/Net/WebsocketServer.cpp \
   $(SRC)/Common/Profiler/Profiler.cpp \
   $(SRC)/Common/System/Display.cpp \
-  $(SRC)/Common/Thread/Executor.cpp \
-  $(SRC)/Common/Thread/PrioritizedWorkQueue.cpp \
-  $(SRC)/Common/Thread/ThreadPool.cpp \
   $(SRC)/Common/Thread/ThreadUtil.cpp \
+  $(SRC)/Common/Thread/ThreadManager.cpp \
+  $(SRC)/Common/Thread/ParallelLoop.cpp \
   $(SRC)/Common/UI/Root.cpp \
   $(SRC)/Common/UI/Screen.cpp \
   $(SRC)/Common/UI/UI.cpp \
@@ -296,15 +297,19 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Common/UI/View.cpp \
   $(SRC)/Common/UI/ViewGroup.cpp \
   $(SRC)/Common/Serialize/Serializer.cpp \
-  $(SRC)/Common/ColorConv.cpp \
+  $(SRC)/Common/ArmCPUDetect.cpp \
+  $(SRC)/Common/CPUDetect.cpp \
   $(SRC)/Common/ExceptionHandlerSetup.cpp \
+  $(SRC)/Common/FakeCPUDetect.cpp \
   $(SRC)/Common/Log.cpp \
   $(SRC)/Common/LogManager.cpp \
+  $(SRC)/Common/LogReporting.cpp \
   $(SRC)/Common/MemArenaAndroid.cpp \
   $(SRC)/Common/MemArenaDarwin.cpp \
   $(SRC)/Common/MemArenaWin32.cpp \
   $(SRC)/Common/MemArenaPosix.cpp \
   $(SRC)/Common/MemoryUtil.cpp \
+  $(SRC)/Common/MipsCPUDetect.cpp \
   $(SRC)/Common/StringUtils.cpp \
   $(SRC)/Common/SysError.cpp \
   $(SRC)/Common/TimeUtil.cpp \
@@ -373,6 +378,7 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Core/HW/SasAudio.cpp.arm \
   $(SRC)/Core/HW/SasReverb.cpp.arm \
   $(SRC)/Core/HW/StereoResampler.cpp.arm \
+  $(SRC)/Core/ControlMapper.cpp \
   $(SRC)/Core/Core.cpp \
   $(SRC)/Core/Compatibility.cpp \
   $(SRC)/Core/Config.cpp \
@@ -403,6 +409,7 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Core/WebServer.cpp \
   $(SRC)/Core/Debugger/Breakpoints.cpp \
   $(SRC)/Core/Debugger/DisassemblyManager.cpp \
+  $(SRC)/Core/Debugger/MemBlockInfo.cpp \
   $(SRC)/Core/Debugger/SymbolMap.cpp \
   $(SRC)/Core/Debugger/WebSocket.cpp \
   $(SRC)/Core/Debugger/WebSocket/BreakpointSubscriber.cpp \
@@ -417,6 +424,8 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Core/Debugger/WebSocket/InputSubscriber.cpp \
   $(SRC)/Core/Debugger/WebSocket/LogBroadcaster.cpp \
   $(SRC)/Core/Debugger/WebSocket/MemorySubscriber.cpp \
+  $(SRC)/Core/Debugger/WebSocket/MemoryInfoSubscriber.cpp \
+  $(SRC)/Core/Debugger/WebSocket/ReplaySubscriber.cpp \
   $(SRC)/Core/Debugger/WebSocket/SteppingBroadcaster.cpp \
   $(SRC)/Core/Debugger/WebSocket/SteppingSubscriber.cpp \
   $(SRC)/Core/Debugger/WebSocket/WebSocketUtils.cpp \
@@ -583,7 +592,45 @@ include $(BUILD_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 include $(LOCAL_PATH)/Locals.mk
-LOCAL_STATIC_LIBRARIES += ppsspp_core libarmips
+
+LIBZSTD_FILES := \
+  $(SRC)/ext/zstd/lib/common/debug.c \
+  $(SRC)/ext/zstd/lib/common/entropy_common.c \
+  $(SRC)/ext/zstd/lib/common/error_private.c \
+  $(SRC)/ext/zstd/lib/common/fse_decompress.c \
+  $(SRC)/ext/zstd/lib/common/pool.c \
+  $(SRC)/ext/zstd/lib/common/threading.c \
+  $(SRC)/ext/zstd/lib/common/xxhash.c \
+  $(SRC)/ext/zstd/lib/common/zstd_common.c \
+  $(SRC)/ext/zstd/lib/compress/fse_compress.c \
+  $(SRC)/ext/zstd/lib/compress/hist.c \
+  $(SRC)/ext/zstd/lib/compress/huf_compress.c \
+  $(SRC)/ext/zstd/lib/compress/zstd_compress.c \
+  $(SRC)/ext/zstd/lib/compress/zstd_compress_literals.c \
+  $(SRC)/ext/zstd/lib/compress/zstd_compress_sequences.c \
+  $(SRC)/ext/zstd/lib/compress/zstd_compress_superblock.c \
+  $(SRC)/ext/zstd/lib/compress/zstd_double_fast.c \
+  $(SRC)/ext/zstd/lib/compress/zstd_fast.c \
+  $(SRC)/ext/zstd/lib/compress/zstd_lazy.c \
+  $(SRC)/ext/zstd/lib/compress/zstd_ldm.c \
+  $(SRC)/ext/zstd/lib/compress/zstd_opt.c \
+  $(SRC)/ext/zstd/lib/compress/zstdmt_compress.c \
+  $(SRC)/ext/zstd/lib/decompress/huf_decompress.c \
+  $(SRC)/ext/zstd/lib/decompress/zstd_ddict.c \
+  $(SRC)/ext/zstd/lib/decompress/zstd_decompress.c \
+  $(SRC)/ext/zstd/lib/decompress/zstd_decompress_block.c \
+  $(SRC)/ext/zstd/lib/dictBuilder/cover.c \
+  $(SRC)/ext/zstd/lib/dictBuilder/divsufsort.c \
+  $(SRC)/ext/zstd/lib/dictBuilder/fastcover.c \
+  $(SRC)/ext/zstd/lib/dictBuilder/zdict.c
+
+LOCAL_MODULE := libzstd
+LOCAL_SRC_FILES := $(LIBZSTD_FILES)
+include $(BUILD_STATIC_LIBRARY)
+
+include $(CLEAR_VARS)
+include $(LOCAL_PATH)/Locals.mk
+LOCAL_STATIC_LIBRARIES += ppsspp_core libarmips libzstd
 
 # These are the files just for ppsspp_jni
 LOCAL_MODULE := ppsspp_jni
@@ -602,6 +649,7 @@ LOCAL_SRC_FILES := \
   $(SRC)/UI/DisplayLayoutScreen.cpp \
   $(SRC)/UI/EmuScreen.cpp \
   $(SRC)/UI/MainScreen.cpp \
+  $(SRC)/UI/MemStickScreen.cpp \
   $(SRC)/UI/MiscScreens.cpp \
   $(SRC)/UI/RemoteISOScreen.cpp \
   $(SRC)/UI/ReportScreen.cpp \
@@ -626,10 +674,6 @@ LOCAL_SRC_FILES := \
   $(SRC)/UI/TextureUtil.cpp \
   $(SRC)/UI/ComboKeyMappingScreen.cpp
 
-ifeq ($(findstring armeabi-v7a,$(TARGET_ARCH_ABI)),armeabi-v7a)
-LOCAL_CFLAGS := $(LOCAL_CFLAGS) -DARM
-endif
-
 ifneq ($(SKIPAPP),1)
   include $(BUILD_SHARED_LIBRARY)
 endif
@@ -637,7 +681,7 @@ endif
 ifeq ($(HEADLESS),1)
   include $(CLEAR_VARS)
   include $(LOCAL_PATH)/Locals.mk
-  LOCAL_STATIC_LIBRARIES += ppsspp_core libarmips
+  LOCAL_STATIC_LIBRARIES += ppsspp_core libarmips libzstd
 
   # Android 5.0 requires PIE for executables.  Only supported on 4.1+, but this is testing anyway.
   LOCAL_CFLAGS += -fPIE
@@ -655,7 +699,7 @@ endif
 ifeq ($(UNITTEST),1)
   include $(CLEAR_VARS)
   include $(LOCAL_PATH)/Locals.mk
-  LOCAL_STATIC_LIBRARIES += ppsspp_core libarmips
+  LOCAL_STATIC_LIBRARIES += ppsspp_core libarmips libzstd
 
   # Android 5.0 requires PIE for executables.  Only supported on 4.1+, but this is testing anyway.
   LOCAL_CFLAGS += -fPIE
@@ -682,6 +726,7 @@ ifeq ($(UNITTEST),1)
     $(SRC)/unittest/JitHarness.cpp \
     $(SRC)/unittest/TestShaderGenerators.cpp \
     $(SRC)/unittest/TestVertexJit.cpp \
+    $(SRC)/unittest/TestThreadManager.cpp \
     $(TESTARMEMITTER_FILE) \
     $(SRC)/unittest/UnitTest.cpp
 

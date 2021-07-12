@@ -17,8 +17,8 @@
 
 #include <algorithm>
 
+#include "Common/Data/Convert/ColorConv.h"
 #include "Common/Profiler/Profiler.h"
-#include "Common/ColorConv.h"
 #include "Core/Config.h"
 #include "GPU/Common/DrawEngineCommon.h"
 #include "GPU/Common/SplineCommon.h"
@@ -36,8 +36,6 @@ DrawEngineCommon::DrawEngineCommon() : decoderMap_(16) {
 	decJitCache_ = new VertexDecoderJitCache();
 	transformed = (TransformedVertex *)AllocateMemoryPages(TRANSFORMED_VERTEX_BUFFER_SIZE, MEM_PROT_READ | MEM_PROT_WRITE);
 	transformedExpanded = (TransformedVertex *)AllocateMemoryPages(3 * TRANSFORMED_VERTEX_BUFFER_SIZE, MEM_PROT_READ | MEM_PROT_WRITE);
-	useHWTransform_ = g_Config.bHardwareTransform;
-	useHWTessellation_ = UpdateUseHWTessellation(g_Config.bHardwareTessellation);
 }
 
 DrawEngineCommon::~DrawEngineCommon() {
@@ -48,6 +46,11 @@ DrawEngineCommon::~DrawEngineCommon() {
 		delete decoder;
 	});
 	ClearSplineBezierWeights();
+}
+
+void DrawEngineCommon::Init() {
+	useHWTransform_ = g_Config.bHardwareTransform;
+	useHWTessellation_ = UpdateUseHWTessellation(g_Config.bHardwareTessellation);
 }
 
 VertexDecoder *DrawEngineCommon::GetVertexDecoder(u32 vtype) {
@@ -270,8 +273,8 @@ bool DrawEngineCommon::GetCurrentSimpleVertices(int count, std::vector<GPUDebugV
 
 	if ((gstate.vertType & GE_VTYPE_IDX_MASK) != GE_VTYPE_IDX_NONE) {
 		const u8 *inds = Memory::GetPointer(gstate_c.indexAddr);
-		const u16 *inds16 = (const u16 *)inds;
-		const u32 *inds32 = (const u32 *)inds;
+		const u16_le *inds16 = (const u16_le *)inds;
+		const u32_le *inds32 = (const u32_le *)inds;
 
 		if (inds) {
 			GetIndexBounds(inds, count, gstate.vertType, &indexLowerBound, &indexUpperBound);
@@ -518,7 +521,6 @@ void DrawEngineCommon::DecodeVertsStep(u8 *dest, int &i, int &decodedVerts) {
 	int indexLowerBound = dc.indexLowerBound;
 	int indexUpperBound = dc.indexUpperBound;
 
-	void *inds = dc.inds;
 	if (dc.indexType == GE_VTYPE_IDX_NONE >> GE_VTYPE_IDX_SHIFT) {
 		// Decode the verts and apply morphing. Simple.
 		dec_->DecodeVerts(dest + decodedVerts * (int)dec_->GetDecVtxFmt().stride,
@@ -599,8 +601,9 @@ void DrawEngineCommon::DecodeVertsStep(u8 *dest, int &i, int &decodedVerts) {
 }
 
 inline u32 ComputeMiniHashRange(const void *ptr, size_t sz) {
-	// Switch to u32 units.
-	const u32 *p = (const u32 *)ptr;
+	// Switch to u32 units, and round up to avoid unaligned accesses.
+	// Probably doesn't matter if we skip the first few bytes in some cases.
+	const u32 *p = (const u32 *)(((uintptr_t)ptr + 3) & ~3);
 	sz >>= 2;
 
 	if (sz > 100) {

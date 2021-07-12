@@ -17,12 +17,13 @@
 
 #pragma once
 
+#include "ppsspp_config.h"
 #include <mutex>
 #include "Common/CommonTypes.h"
 #include "Core/Debugger/SymbolMap.h"
 #include "Core/MIPS/MIPSAnalyst.h"
 
-#ifdef _M_X64
+#if PPSSPP_ARCH(AMD64)
 typedef u64 HashType;
 #else
 typedef u32 HashType;
@@ -223,3 +224,4 @@ private:
 };
 
 bool isInInterval(u32 start, u32 size, u32 value);
+bool IsLikelyStringAt(uint32_t addr);

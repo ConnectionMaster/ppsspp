@@ -73,10 +73,10 @@ struct CompatFlags {
 	bool MemstickFixedFree;
 	bool DateLimited;
 	bool ReinterpretFramebuffers;
-	bool DoublePrecisionSinCos;
 	bool ShaderColorBitmask;
 	bool DisableFirstFrameReadback;
 	bool DisableRangeCulling;
+	bool MpegAvcWarmUp;
 };
 
 class IniFile;

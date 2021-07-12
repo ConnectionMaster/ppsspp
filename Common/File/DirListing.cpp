@@ -20,7 +20,10 @@
 
 #include "Common/Data/Encoding/Utf8.h"
 #include "Common/StringUtils.h"
+#include "Common/Net/URL.h"
 #include "Common/File/DirListing.h"
+#include "Common/File/FileUtil.h"
+#include "Common/File/AndroidStorage.h"
 
 #if !defined(__linux__) && !defined(_WIN32) && !defined(__QNX__)
 #define stat64 stat
@@ -33,20 +36,31 @@
 #define fileno
 #endif // HAVE_LIBNX
 
-// Returns true if filename is a directory
-bool isDirectory(const std::string & filename) {
-	FileInfo info;
-	getFileInfo(filename.c_str(), &info);
-	return info.isDirectory;
-}
+namespace File {
 
-bool getFileInfo(const char *path, FileInfo * fileInfo) {
+bool GetFileInfo(const Path &path, FileInfo * fileInfo) {
+	switch (path.Type()) {
+	case PathType::NATIVE:
+		break;  // OK
+	case PathType::CONTENT_URI:
+		return Android_GetFileInfo(path.ToString(), fileInfo);
+	default:
+		return false;
+	}
+
 	// TODO: Expand relative paths?
 	fileInfo->fullName = path;
 
 #ifdef _WIN32
+	auto FiletimeToStatTime = [](FILETIME ft) {
+		const int windowsTickResolution = 10000000;
+		const int64_t secToUnixEpoch = 11644473600LL;
+		int64_t ticks = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+		return (int64_t)(ticks / windowsTickResolution - secToUnixEpoch);
+	};
+
 	WIN32_FILE_ATTRIBUTE_DATA attrs;
-	if (!GetFileAttributesExW(ConvertUTF8ToWString(path).c_str(), GetFileExInfoStandard, &attrs)) {
+	if (!GetFileAttributesExW(path.ToWString().c_str(), GetFileExInfoStandard, &attrs)) {
 		fileInfo->size = 0;
 		fileInfo->isDirectory = false;
 		fileInfo->exists = false;
@@ -56,16 +70,25 @@ bool getFileInfo(const char *path, FileInfo * fileInfo) {
 	fileInfo->isDirectory = (attrs.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 	fileInfo->isWritable = (attrs.dwFileAttributes & FILE_ATTRIBUTE_READONLY) == 0;
 	fileInfo->exists = true;
+	fileInfo->atime = FiletimeToStatTime(attrs.ftLastAccessTime);
+	fileInfo->mtime = FiletimeToStatTime(attrs.ftLastWriteTime);
+	fileInfo->ctime = FiletimeToStatTime(attrs.ftCreationTime);
+	if (attrs.dwFileAttributes & FILE_ATTRIBUTE_READONLY) {
+		fileInfo->access = 0444;  // Read
+	} else {
+		fileInfo->access = 0666;  // Read/Write
+	}
+	if (attrs.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+		fileInfo->access |= 0111;  // Execute
+	}
 #else
-
-	std::string copy(path);
 
 #if (defined __ANDROID__) && (__ANDROID_API__ < 21)
 	struct stat file_info;
-	int result = stat(copy.c_str(), &file_info);
+	int result = stat(path.c_str(), &file_info);
 #else
 	struct stat64 file_info;
-	int result = stat64(copy.c_str(), &file_info);
+	int result = stat64(path.c_str(), &file_info);
 #endif
 	if (result < 0) {
 		fileInfo->exists = false;
@@ -76,6 +99,10 @@ bool getFileInfo(const char *path, FileInfo * fileInfo) {
 	fileInfo->isWritable = false;
 	fileInfo->size = file_info.st_size;
 	fileInfo->exists = true;
+	fileInfo->atime = file_info.st_atime;
+	fileInfo->mtime = file_info.st_mtime;
+	fileInfo->ctime = file_info.st_ctime;
+	fileInfo->access = file_info.st_mode & 0x1ff;
 	// HACK: approximation
 	if (file_info.st_mode & 0200)
 		fileInfo->isWritable = true;
@@ -83,14 +110,16 @@ bool getFileInfo(const char *path, FileInfo * fileInfo) {
 	return true;
 }
 
-std::string getFileExtension(const std::string & fn) {
-	int pos = (int)fn.rfind(".");
-	if (pos < 0) return "";
-	std::string ext = fn.substr(pos + 1);
-	for (size_t i = 0; i < ext.size(); i++) {
-		ext[i] = tolower(ext[i]);
+bool GetModifTime(const Path &filename, tm & return_time) {
+	memset(&return_time, 0, sizeof(return_time));
+	FileInfo info;
+	if (GetFileInfo(filename, &info)) {
+		time_t t = info.mtime;
+		localtime_r((time_t*)&t, &return_time);
+		return true;
+	} else {
+		return false;
 	}
-	return ext;
 }
 
 bool FileInfo::operator <(const FileInfo & other) const {
@@ -104,7 +133,61 @@ bool FileInfo::operator <(const FileInfo & other) const {
 		return false;
 }
 
-size_t getFilesInDir(const char *directory, std::vector<FileInfo> * files, const char *filter, int flags) {
+std::vector<File::FileInfo> ApplyFilter(std::vector<File::FileInfo> files, const char *filter) {
+	std::set<std::string> filters;
+	if (filter) {
+		std::string tmp;
+		while (*filter) {
+			if (*filter == ':') {
+				filters.insert("." + tmp);
+				tmp.clear();
+			} else {
+				tmp.push_back(*filter);
+			}
+			filter++;
+		}
+		if (!tmp.empty())
+			filters.insert("." + tmp);
+	}
+
+	auto pred = [&](const File::FileInfo &info) {
+		if (info.isDirectory || !filter)
+			return false;
+		std::string ext = info.fullName.GetFileExtension();
+		return filters.find(ext) == filters.end();
+	};
+	files.erase(std::remove_if(files.begin(), files.end(), pred), files.end());
+	return files;
+}
+
+size_t GetFilesInDir(const Path &directory, std::vector<FileInfo> * files, const char *filter, int flags) {
+	if (directory.Type() == PathType::CONTENT_URI) {
+		std::vector<File::FileInfo> fileList = Android_ListContentUri(directory.ToString());
+		*files = ApplyFilter(fileList, filter);
+		std::sort(files->begin(), files->end());
+		return true;
+	}
+
+#if PPSSPP_PLATFORM(WINDOWS)
+	if (directory.IsRoot()) {
+		// Special path that means root of file system.
+		std::vector<std::string> drives = File::GetWindowsDrives();
+		for (auto drive = drives.begin(); drive != drives.end(); ++drive) {
+			if (*drive == "A:/" || *drive == "B:/")
+				continue;
+			File::FileInfo fake;
+			fake.fullName = Path(*drive);
+			fake.name = *drive;
+			fake.isDirectory = true;
+			fake.exists = true;
+			fake.size = 0;
+			fake.isWritable = false;
+			files->push_back(fake);
+		}
+		return files->size();
+	}
+#endif
+
 	size_t foundEntries = 0;
 	std::set<std::string> filters;
 	if (filter) {
@@ -112,6 +195,7 @@ size_t getFilesInDir(const char *directory, std::vector<FileInfo> * files, const
 		while (*filter) {
 			if (*filter == ':') {
 				filters.insert(std::move(tmp));
+				tmp.clear();
 			} else {
 				tmp.push_back(*filter);
 			}
@@ -123,7 +207,7 @@ size_t getFilesInDir(const char *directory, std::vector<FileInfo> * files, const
 #ifdef _WIN32
 	// Find the first file in the directory.
 	WIN32_FIND_DATA ffd;
-	HANDLE hFind = FindFirstFileEx((ConvertUTF8ToWString(directory) + L"\\*").c_str(), FindExInfoStandard, &ffd, FindExSearchNameMatch, NULL, 0);
+	HANDLE hFind = FindFirstFileEx((directory.ToWString() + L"\\*").c_str(), FindExInfoStandard, &ffd, FindExSearchNameMatch, NULL, 0);
 	if (hFind == INVALID_HANDLE_VALUE) {
 		return 0;
 	}
@@ -138,7 +222,7 @@ size_t getFilesInDir(const char *directory, std::vector<FileInfo> * files, const
 	//if (directoryWithSlash.back() != '/')
 	//	directoryWithSlash += "/";
 
-	DIR *dirp = opendir(directory);
+	DIR *dirp = opendir(directory.c_str());
 	if (!dirp)
 		return 0;
 	// non windows loop
@@ -164,23 +248,19 @@ size_t getFilesInDir(const char *directory, std::vector<FileInfo> * files, const
 
 		FileInfo info;
 		info.name = virtualName;
-		std::string dir = directory;
 
-		// Only append a slash if there isn't one on the end.
-		size_t lastSlash = dir.find_last_of("/");
-		if (lastSlash != (dir.length() - 1))
-			dir.append("/");
-
-		info.fullName = dir + virtualName;
-		info.isDirectory = isDirectory(info.fullName);
+		info.fullName = directory / virtualName;
+		info.isDirectory = IsDirectory(info.fullName);
 		info.exists = true;
 		info.size = 0;
 		info.isWritable = false;  // TODO - implement some kind of check
 		if (!info.isDirectory) {
-			std::string ext = getFileExtension(info.fullName);
-			if (filter) {
-				if (filters.find(ext) == filters.end())
+			std::string ext = info.fullName.GetFileExtension();
+			if (!ext.empty()) {
+				ext = ext.substr(1);  // Remove the dot.
+				if (filter && filters.find(ext) == filters.end()) {
 					continue;
+				}
 			}
 		}
 
@@ -199,25 +279,25 @@ size_t getFilesInDir(const char *directory, std::vector<FileInfo> * files, const
 	return foundEntries;
 }
 
-int64_t getDirectoryRecursiveSize(const std::string & path, const char *filter, int flags) {
+int64_t GetDirectoryRecursiveSize(const Path &path, const char *filter, int flags) {
 	std::vector<FileInfo> fileInfo;
-	getFilesInDir(path.c_str(), &fileInfo, filter, flags);
+	GetFilesInDir(path, &fileInfo, filter, flags);
 	int64_t sizeSum = 0;
-	// Note: getFileInDir does not fill in fileSize properly.
+	// Note: GetFilesInDir does not fill in fileSize.
 	for (size_t i = 0; i < fileInfo.size(); i++) {
 		FileInfo finfo;
-		getFileInfo(fileInfo[i].fullName.c_str(), &finfo);
+		GetFileInfo(fileInfo[i].fullName, &finfo);
 		if (!finfo.isDirectory)
 			sizeSum += finfo.size;
 		else
-			sizeSum += getDirectoryRecursiveSize(finfo.fullName, filter, flags);
+			sizeSum += GetDirectoryRecursiveSize(finfo.fullName, filter, flags);
 	}
 	return sizeSum;
 }
 
 #ifdef _WIN32
 // Returns a vector with the device names
-std::vector<std::string> getWindowsDrives()
+std::vector<std::string> GetWindowsDrives()
 {
 #if PPSSPP_PLATFORM(UWP)
 	return std::vector<std::string>();  // TODO UWP http://stackoverflow.com/questions/37404405/how-to-get-logical-drives-names-in-windows-10
@@ -244,3 +324,5 @@ std::vector<std::string> getWindowsDrives()
 #endif
 }
 #endif
+
+}  // namespace File

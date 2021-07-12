@@ -25,24 +25,19 @@
 #include "Common/File/DirListing.h"
 #include "Core/FileLoaders/LocalFileLoader.h"
 
+#if PPSSPP_PLATFORM(ANDROID)
+#include "android/jni/app-android.h"
+#endif
+
 #ifdef _WIN32
 #include "Common/CommonWindows.h"
 #else
 #include <fcntl.h>
 #endif
 
-LocalFileLoader::LocalFileLoader(const std::string &filename)
-	: filesize_(0), filename_(filename) {
-	if (filename.empty()) {
-		ERROR_LOG(FILESYS, "LocalFileLoader can't load empty filenames");
-		return;
-	}
 #ifndef _WIN32
 
-	fd_ = open(filename.c_str(), O_RDONLY | O_CLOEXEC);
-	if (fd_ == -1) {
-		return;
-	}
+void LocalFileLoader::DetectSizeFd() {
 #if PPSSPP_PLATFORM(ANDROID) || (defined(_FILE_OFFSET_BITS) && _FILE_OFFSET_BITS < 64)
 	off64_t off = lseek64(fd_, 0, SEEK_END);
 	filesize_ = off;
@@ -52,20 +47,53 @@ LocalFileLoader::LocalFileLoader(const std::string &filename)
 	filesize_ = off;
 	lseek(fd_, 0, SEEK_SET);
 #endif
+}
+#endif
+
+LocalFileLoader::LocalFileLoader(const Path &filename)
+	: filesize_(0), filename_(filename) {
+	if (filename.empty()) {
+		ERROR_LOG(FILESYS, "LocalFileLoader can't load empty filenames");
+		return;
+	}
+
+#if PPSSPP_PLATFORM(ANDROID)
+	if (filename.Type() == PathType::CONTENT_URI) {
+		int fd = Android_OpenContentUriFd(filename.ToString(), Android_OpenContentUriMode::READ);
+		INFO_LOG(SYSTEM, "Fd %d for content URI: '%s'", fd, filename.c_str());
+		if (fd == -1) {
+			ERROR_LOG(FILESYS, "LoadFileLoader failed to open content URI: '%s'", filename.c_str());
+			return;
+		}
+		fd_ = fd;
+		isOpenedByFd_ = true;
+		DetectSizeFd();
+		return;
+	}
+#endif
+
+#ifndef _WIN32
+
+	fd_ = open(filename.c_str(), O_RDONLY | O_CLOEXEC);
+	if (fd_ == -1) {
+		return;
+	}
+
+	DetectSizeFd();
 
 #else // _WIN32
 
 	const DWORD access = GENERIC_READ, share = FILE_SHARE_READ, mode = OPEN_EXISTING, flags = FILE_ATTRIBUTE_NORMAL;
 #if PPSSPP_PLATFORM(UWP)
-	handle_ = CreateFile2(ConvertUTF8ToWString(filename).c_str(), access, share, mode, nullptr);
+	handle_ = CreateFile2(filename.ToWString().c_str(), access, share, mode, nullptr);
 #else
-	handle_ = CreateFile(ConvertUTF8ToWString(filename).c_str(), access, share, nullptr, mode, flags, nullptr);
+	handle_ = CreateFile(filename.ToWString().c_str(), access, share, nullptr, mode, flags, nullptr);
 #endif
 	if (handle_ == INVALID_HANDLE_VALUE) {
 		return;
 	}
 	LARGE_INTEGER end_offset;
-	const LARGE_INTEGER zero = { 0 };
+	const LARGE_INTEGER zero{};
 	if (SetFilePointerEx(handle_, zero, &end_offset, FILE_END) == 0) {
 		// Couldn't seek in the file. Close it and give up? This should never happen.
 		CloseHandle(handle_);
@@ -92,20 +120,27 @@ LocalFileLoader::~LocalFileLoader() {
 bool LocalFileLoader::Exists() {
 	// If we couldn't open it for reading, we say it does not exist.
 #ifndef _WIN32
+	if (isOpenedByFd_) {
+		return fd_ != -1;
+	}
 	if (fd_ != -1 || IsDirectory()) {
 #else
 	if (handle_ != INVALID_HANDLE_VALUE || IsDirectory()) {
 #endif
-		FileInfo info;
-		return getFileInfo(filename_.c_str(), &info);
+		File::FileInfo info;
+		if (File::GetFileInfo(filename_, &info)) {
+			return info.exists;
+		} else {
+			return false;
+		}
 	}
 	return false;
 }
 
 bool LocalFileLoader::IsDirectory() {
-	FileInfo info;
-	if (getFileInfo(filename_.c_str(), &info)) {
-		return info.isDirectory;
+	File::FileInfo info;
+	if (File::GetFileInfo(filename_, &info)) {
+		return info.exists && info.isDirectory;
 	}
 	return false;
 }
@@ -114,11 +149,15 @@ s64 LocalFileLoader::FileSize() {
 	return filesize_;
 }
 
-std::string LocalFileLoader::Path() const {
-	return filename_;
-}
-
 size_t LocalFileLoader::ReadAt(s64 absolutePos, size_t bytes, size_t count, void *data, Flags flags) {
+	if (bytes == 0)
+		return 0;
+
+	if (filesize_ == 0) {
+		ERROR_LOG(FILESYS, "ReadAt from 0-sized file: %s", filename_.c_str());
+		return 0;
+	}
+
 #if PPSSPP_PLATFORM(SWITCH)
 	// Toolchain has no fancy IO API.  We must lock.
 	std::lock_guard<std::mutex> guard(readLock_);

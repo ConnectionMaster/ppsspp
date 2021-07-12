@@ -866,7 +866,6 @@ void CtrlDisAsmView::toggleBreakpoint(bool toggleEnabled)
 void CtrlDisAsmView::onMouseDown(WPARAM wParam, LPARAM lParam, int button)
 {
 	dontRedraw = false;
-	int x = LOWORD(lParam);
 	int y = HIWORD(lParam);
 
 	u32 newAddress = yToAddress(y);
@@ -921,7 +920,6 @@ void CtrlDisAsmView::onMouseUp(WPARAM wParam, LPARAM lParam, int button)
 {
 	if (button == 1)
 	{
-		int x = LOWORD(lParam);
 		int y = HIWORD(lParam);
 		setCurAddress(yToAddress(y), KeyDownAsync(VK_SHIFT));
 		redraw();
@@ -1076,7 +1074,6 @@ void CtrlDisAsmView::onMouseMove(WPARAM wParam, LPARAM lParam, int button)
 {
 	if ((button & 1) != 0)
 	{
-		int x = LOWORD(lParam);
 		int y = HIWORD(lParam);
 		setCurAddress(yToAddress(y), KeyDownAsync(VK_SHIFT));
 		// TODO: Perhaps don't do this every time, but on a timer?
@@ -1097,6 +1094,10 @@ void CtrlDisAsmView::updateStatusBarText()
 	text[0] = 0;
 	if (line.type == DISTYPE_OPCODE || line.type == DISTYPE_MACRO)
 	{
+		if (line.info.hasRelevantAddress && IsLikelyStringAt(line.info.relevantAddress)) {
+			snprintf(text, sizeof(text), "[%08X] = \"%s\"", line.info.relevantAddress, Memory::GetCharPointer(line.info.relevantAddress));
+		}
+
 		if (line.info.isDataAccess)
 		{
 			if (!Memory::IsValidAddress(line.info.dataAddress))
@@ -1191,7 +1192,7 @@ void CtrlDisAsmView::search(bool continueSearch)
 
 	if (continueSearch == false || searchQuery[0] == 0)
 	{
-		if (InputBox_GetString(MainWindow::GetHInstance(),MainWindow::GetHWND(),L"Search for:","",searchQuery) == false
+		if (InputBox_GetString(MainWindow::GetHInstance(), MainWindow::GetHWND(), L"Search for:", searchQuery, searchQuery) == false
 			|| searchQuery[0] == 0)
 		{
 			SetFocus(wnd);

@@ -15,6 +15,7 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
 #include <cstdio>
 
 #include "headless/WindowsHeadlessHost.h"
@@ -67,11 +68,11 @@ HWND CreateHiddenWindow() {
 
 void WindowsHeadlessHost::LoadNativeAssets()
 {
-	VFSRegister("", new DirectoryAssetReader("assets/"));
-	VFSRegister("", new DirectoryAssetReader(""));
-	VFSRegister("", new DirectoryAssetReader("../"));
-	VFSRegister("", new DirectoryAssetReader("../Windows/assets/"));
-	VFSRegister("", new DirectoryAssetReader("../Windows/"));
+	VFSRegister("", new DirectoryAssetReader(Path("assets")));
+	VFSRegister("", new DirectoryAssetReader(Path("")));
+	VFSRegister("", new DirectoryAssetReader(Path("..")));
+	VFSRegister("", new DirectoryAssetReader(Path("../Windows/assets")));
+	VFSRegister("", new DirectoryAssetReader(Path("../Windows")));
 }
 
 void WindowsHeadlessHost::SendDebugOutput(const std::string &output)

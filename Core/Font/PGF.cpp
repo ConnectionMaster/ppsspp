@@ -41,7 +41,7 @@ static int getBits(int numBits, const u8 *buf, size_t pos) {
 	_dbg_assert_msg_(numBits <= 32, "Unable to return more than 32 bits, %d requested", numBits);
 
 	const size_t wordpos = pos >> 5;
-	const u32 *wordbuf = (const u32 *)buf;
+	const u32_le *wordbuf = (const u32_le *)buf;
 	const u8 bitoff = pos & 31;
 
 	// Might just be in one, has to be within two.
@@ -53,8 +53,10 @@ static int getBits(int numBits, const u8 *buf, size_t pos) {
 
 		const u8 done = 32 - bitoff;
 		const u8 remaining = numBits - done;
-		const u32 mask = (1 << remaining) - 1;
-		v |= (wordbuf[wordpos + 1] & mask) << done;
+		if (remaining > 0) {
+			const u32 mask = (1 << remaining) - 1;
+			v |= (wordbuf[wordpos + 1] & mask) << done;
+		}
 		return v;
 	}
 }
@@ -228,13 +230,13 @@ bool PGF::ReadPtr(const u8 *ptr, size_t dataSize) {
 
 	const u8 *uptr = (const u8 *)wptr;
 
-	if (uptr >= startPtr + dataSize) {
-		return false;
-	}
-
 	int shadowCharMapSize = ((header.shadowMapLength * header.shadowMapBpe + 31) & ~31) / 8;
 	const u8 *shadowCharMap = uptr;
 	uptr += shadowCharMapSize;
+
+	if (uptr < startPtr || uptr >= startPtr + dataSize) {
+		return false;
+	}
 
 	const u16_le *sptr = (const u16_le *)uptr;
 	if (header.revision == 3) {
@@ -255,10 +257,6 @@ bool PGF::ReadPtr(const u8 *ptr, size_t dataSize) {
 
 	uptr = (const u8 *)sptr;
 
-	if (uptr >= startPtr + dataSize) {
-		return false;
-	}
-
 	int charMapSize = ((header.charMapLength * header.charMapBpe + 31) & ~31) / 8;
 	const u8 *charMap = uptr;
 	uptr += charMapSize;
@@ -266,6 +264,10 @@ bool PGF::ReadPtr(const u8 *ptr, size_t dataSize) {
 	int charPointerSize = (((header.charPointerLength * header.charPointerBpe + 31) & ~31) / 8);
 	const u8 *charPointerTable = uptr;
 	uptr += charPointerSize;
+
+	if (uptr < startPtr || uptr >= startPtr + dataSize) {
+		return false;
+	}
 
 	// PGF Fontdata.
 	u32 fontDataOffset = (u32)(uptr - startPtr);
@@ -348,7 +350,7 @@ bool PGF::GetCharInfo(int charCode, PGFCharInfo *charInfo, int altCharCode, int 
 	charInfo->sfp26Height = glyph.dimensionHeight;
 	charInfo->sfp26Ascender = glyph.yAdjustH;
 	// Font y goes upwards.  If top is 10 and height is 11, the descender is approx. -1 (below 0.)
-	charInfo->sfp26Descender = charInfo->sfp26Ascender - (s32_le)charInfo->sfp26Height;
+	charInfo->sfp26Descender = charInfo->sfp26Ascender - (s32)charInfo->sfp26Height;
 	charInfo->sfp26BearingHX = glyph.xAdjustH;
 	charInfo->sfp26BearingHY = glyph.yAdjustH;
 	charInfo->sfp26BearingVX = glyph.xAdjustV;

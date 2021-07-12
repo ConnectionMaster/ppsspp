@@ -20,11 +20,11 @@
 #include <D3Dcompiler.h>
 
 #include "Common/Common.h"
+#include "Common/Data/Convert/ColorConv.h"
 #include "Common/System/Display.h"
 #include "Common/Math/lin/matrix4x4.h"
 #include "Common/Math/math_util.h"
 #include "Common/GPU/thin3d.h"
-#include "Common/ColorConv.h"
 
 #include "Core/MemMap.h"
 #include "Core/Config.h"
@@ -183,8 +183,6 @@ void FramebufferManagerD3D11::DrawActiveTexture(float x, float y, float w, float
 		{{x + w, y + h,0}, u1, v1},
 		{{x, y + h, 0}, u0, v1},
 	};
-
-	static const short indices[4] = { 0, 1, 3, 2 };
 
 	if (uvRotation != ROTATION_LOCKED_HORIZONTAL) {
 		float temp[8];

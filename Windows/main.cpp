@@ -104,6 +104,9 @@ static std::string restartArgs;
 HMENU g_hPopupMenus;
 int g_activeWindow = 0;
 
+static std::thread inputBoxThread;
+static bool inputBoxRunning = false;
+
 void OpenDirectory(const char *path) {
 	PIDLIST_ABSOLUTE pidl = ILCreateFromPath(ConvertUTF8ToWString(ReplaceAll(path, "/", "\\")).c_str());
 	if (pidl) {
@@ -307,6 +310,8 @@ bool System_GetPropertyBool(SystemProperty prop) {
 #else
 		return false;
 #endif
+	case SYSPROP_CAN_JIT:
+		return true;
 	default:
 		return false;
 	}
@@ -386,12 +391,19 @@ void EnableCrashingOnCrashes() {
 }
 
 void System_InputBoxGetString(const std::string &title, const std::string &defaultValue, std::function<void(bool, const std::string &)> cb) {
-	std::string out;
-	if (InputBox_GetString(MainWindow::GetHInstance(), MainWindow::GetHWND(), ConvertUTF8ToWString(title).c_str(), defaultValue, out)) {
-		NativeInputBoxReceived(cb, true, out);
-	} else {
-		NativeInputBoxReceived(cb, false, "");
+	if (inputBoxRunning) {
+		inputBoxThread.join();
 	}
+
+	inputBoxRunning = true;
+	inputBoxThread = std::thread([=] {
+		std::string out;
+		if (InputBox_GetString(MainWindow::GetHInstance(), MainWindow::GetHWND(), ConvertUTF8ToWString(title).c_str(), defaultValue, out)) {
+			NativeInputBoxReceived(cb, true, out);
+		} else {
+			NativeInputBoxReceived(cb, false, "");
+		}
+	});
 }
 
 static std::string GetDefaultLangRegion() {
@@ -417,6 +429,7 @@ static std::string GetDefaultLangRegion() {
 
 static const int EXIT_CODE_VULKAN_WORKS = 42;
 
+#ifndef _DEBUG
 static bool DetectVulkanInExternalProcess() {
 	std::wstring workingDirectory;
 	std::wstring moduleFilename;
@@ -447,6 +460,7 @@ static bool DetectVulkanInExternalProcess() {
 
 	return exitCode == EXIT_CODE_VULKAN_WORKS;
 }
+#endif
 
 std::vector<std::wstring> GetWideCmdLine() {
 	wchar_t **wargv;
@@ -483,13 +497,17 @@ static void WinMainInit() {
 #endif
 	PROFILE_INIT();
 
-#if defined(_M_X64) && defined(_MSC_VER) && _MSC_VER < 1900
+#if PPSSPP_ARCH(AMD64) && defined(_MSC_VER) && _MSC_VER < 1900
 	// FMA3 support in the 2013 CRT is broken on Vista and Windows 7 RTM (fixed in SP1). Just disable it.
 	_set_FMA3_enable(0);
 #endif
 }
 
 static void WinMainCleanup() {
+	if (inputBoxRunning) {
+		inputBoxThread.join();
+		inputBoxRunning = false;
+	}
 	net::Shutdown();
 	CoUninitialize();
 
@@ -499,7 +517,7 @@ static void WinMainCleanup() {
 }
 
 int WINAPI WinMain(HINSTANCE _hInstance, HINSTANCE hPrevInstance, LPSTR szCmdLine, int iCmdShow) {
-	setCurrentThreadName("Main");
+	SetCurrentThreadName("Main");
 
 	WinMainInit();
 
@@ -509,9 +527,9 @@ int WINAPI WinMain(HINSTANCE _hInstance, HINSTANCE hPrevInstance, LPSTR szCmdLin
 	bool showLog = true;
 #endif
 
-	const std::string &exePath = File::GetExeDirectory();
-	VFSRegister("", new DirectoryAssetReader((exePath + "/assets/").c_str()));
-	VFSRegister("", new DirectoryAssetReader(exePath.c_str()));
+	const Path &exePath = File::GetExeDirectory();
+	VFSRegister("", new DirectoryAssetReader(exePath / "assets"));
+	VFSRegister("", new DirectoryAssetReader(exePath));
 
 	langRegion = GetDefaultLangRegion();
 	osName = GetWindowsVersion() + " " + GetWindowsSystemArchitecture();
@@ -544,7 +562,7 @@ int WINAPI WinMain(HINSTANCE _hInstance, HINSTANCE hPrevInstance, LPSTR szCmdLin
 
 	// On Win32 it makes more sense to initialize the system directories here
 	// because the next place it was called was in the EmuThread, and it's too late by then.
-	g_Config.internalDataDirectory = W32Util::UserDocumentsPath();
+	g_Config.internalDataDirectory = Path(W32Util::UserDocumentsPath());
 	InitSysDirectories();
 
 	// Check for the Vulkan workaround before any serious init.
@@ -565,9 +583,7 @@ int WINAPI WinMain(HINSTANCE _hInstance, HINSTANCE hPrevInstance, LPSTR szCmdLin
 
 	// Load config up here, because those changes below would be overwritten
 	// if it's not loaded here first.
-	g_Config.AddSearchPath("");
-	g_Config.AddSearchPath(GetSysDirectory(DIRECTORY_SYSTEM));
-	g_Config.SetDefaultPath(GetSysDirectory(DIRECTORY_SYSTEM));
+	g_Config.SetSearchPath(GetSysDirectory(DIRECTORY_SYSTEM));
 	g_Config.Load(configFilename.c_str(), controlsConfigFilename.c_str());
 
 	bool debugLogLevel = false;
@@ -656,7 +672,6 @@ int WINAPI WinMain(HINSTANCE _hInstance, HINSTANCE hPrevInstance, LPSTR szCmdLin
 	MainWindow::Show(_hInstance);
 
 	HWND hwndMain = MainWindow::GetHWND();
-	HWND hwndDisplay = MainWindow::GetDisplayHWND();
 
 	//initialize custom controls
 	CtrlDisAsmView::init();
@@ -703,16 +718,16 @@ int WINAPI WinMain(HINSTANCE _hInstance, HINSTANCE hPrevInstance, LPSTR szCmdLin
 		{
 		case WINDOW_MAINWINDOW:
 			wnd = hwndMain;
-			accel = hAccelTable;
+			accel = g_Config.bSystemControls ? hAccelTable : NULL;
 			break;
 		case WINDOW_CPUDEBUGGER:
-			wnd = disasmWindow ? disasmWindow->GetDlgHandle() : 0;
-			accel = hDebugAccelTable;
+			wnd = disasmWindow ? disasmWindow->GetDlgHandle() : NULL;
+			accel = g_Config.bSystemControls ? hDebugAccelTable : NULL;
 			break;
 		case WINDOW_GEDEBUGGER:
 		default:
-			wnd = 0;
-			accel = 0;
+			wnd = NULL;
+			accel = NULL;
 			break;
 		}
 

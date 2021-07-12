@@ -24,7 +24,7 @@ public:
 	WaveFileWriter();
 	~WaveFileWriter();
 
-	bool Start(const std::string& filename, unsigned int HLESampleRate);
+	bool Start(const Path& filename, unsigned int HLESampleRate);
 	void Stop();
 
 	void SetSkipSilence(bool skip) { skip_silence = skip; }
@@ -36,7 +36,6 @@ private:
 	File::IOFile file;
 	bool skip_silence = false;
 	uint32_t audio_size = 0;
-	std::array<short, BUFFER_SIZE> conv_buffer{};
 	void Write(uint32_t value);
 	void Write4(const char* ptr);
 };

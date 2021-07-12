@@ -157,7 +157,6 @@ static const int frameTimeHistorySize = (int)ARRAY_SIZE(frameTimeHistory);
 static int frameTimeHistoryPos = 0;
 static int frameTimeHistoryValid = 0;
 static double lastFrameTimeHistory = 0.0;
-static double monitorFpsUntil = 0.0;
 static int lastNumFlips = 0;
 static float flips = 0.0f;
 static int actualFlips = 0;  // taking frameskip into account
@@ -299,7 +298,8 @@ void __DisplayDoState(PointerWrap &p) {
 			ScheduleLagSync();
 		}
 	} else {
-		lagSyncEvent = CoreTiming::RegisterEvent("LagSync", &hleLagSync);
+		lagSyncEvent = -1;
+		CoreTiming::RestoreRegisterEvent(lagSyncEvent, "LagSync", &hleLagSync);
 		ScheduleLagSync();
 	}
 
@@ -443,7 +443,7 @@ static bool IsRunningSlow() {
 			best = std::max(fpsHistory[index], best);
 		}
 
-		return best < System_GetPropertyFloat(SYSPROP_DISPLAY_REFRESH_RATE) * 0.999;
+		return best < System_GetPropertyFloat(SYSPROP_DISPLAY_REFRESH_RATE) * 0.97;
 	}
 
 	return false;
@@ -599,7 +599,6 @@ static void DoFrameTiming(bool &throttle, bool &skipFrame, float timestep) {
 	}
 
 	// Auto-frameskip automatically if speed limit is set differently than the default.
-	bool useAutoFrameskip = g_Config.bAutoFrameSkip && g_Config.iRenderingMode != FB_NON_BUFFERED_MODE;
 	bool forceFrameskip = fpsLimit > 60 && unthrottleNeedsSkip;
 	int frameSkipNum = CalculateFrameSkip();
 	if (g_Config.bAutoFrameSkip || forceFrameskip) {
@@ -771,7 +770,10 @@ void __DisplayFlip(int cyclesLate) {
 		// Let the user know if we're running slow, so they know to adjust settings.
 		// Sometimes users just think the sound emulation is broken.
 		static bool hasNotifiedSlow = false;
-		if (!g_Config.bHideSlowWarnings && !hasNotifiedSlow && PSP_CoreParameter().fpsLimit == FPSLimit::NORMAL && IsRunningSlow()) {
+		if (!g_Config.bHideSlowWarnings &&
+			!hasNotifiedSlow &&
+			PSP_CoreParameter().fpsLimit == FPSLimit::NORMAL &&
+			IsRunningSlow()) {
 #ifndef _DEBUG
 			auto err = GetI18NCategory("Error");
 			if (g_Config.bSoftwareRendering) {

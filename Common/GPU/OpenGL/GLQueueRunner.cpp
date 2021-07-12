@@ -1,3 +1,4 @@
+#include "ppsspp_config.h"
 #include <algorithm>
 
 #include "Common/GPU/OpenGL/GLCommon.h"
@@ -16,9 +17,9 @@
 #include "GLRenderManager.h"
 #include "DataFormatGL.h"
 
-#define TEXCACHE_NAME_CACHE_SIZE 16
+static constexpr int TEXCACHE_NAME_CACHE_SIZE = 16;
 
-#ifdef IOS
+#if PPSSPP_PLATFORM(IOS)
 extern void bindDefaultFBO();
 #endif
 
@@ -198,10 +199,10 @@ void GLQueueRunner::RunInitSteps(const std::vector<GLRInitStep> &steps, bool ski
 				// Dual source alpha
 				glBindFragDataLocationIndexed(program->program, 0, 0, "fragColor0");
 				glBindFragDataLocationIndexed(program->program, 0, 1, "fragColor1");
-			} else if (gl_extensions.VersionGEThan(3, 3, 0)) {
+			} else if (gl_extensions.VersionGEThan(3, 0, 0)) {
 				glBindFragDataLocation(program->program, 0, "fragColor0");
 			}
-#elif !defined(IOS)
+#elif !PPSSPP_PLATFORM(IOS)
 			if (gl_extensions.GLES3 && step.create_program.support_dual_source) {
 				glBindFragDataLocationIndexedEXT(program->program, 0, 0, "fragColor0");
 				glBindFragDataLocationIndexedEXT(program->program, 0, 1, "fragColor1");
@@ -792,6 +793,7 @@ void GLQueueRunner::PerformRenderPass(const GLRStep &step, bool first, bool last
 	bool blendEnabled = false;
 	bool cullEnabled = false;
 	bool ditherEnabled = false;
+	bool depthClampEnabled = false;
 #ifndef USING_GLES2
 	int logicOp = -1;
 	bool logicEnabled = false;
@@ -799,7 +801,7 @@ void GLQueueRunner::PerformRenderPass(const GLRStep &step, bool first, bool last
 	GLuint blendEqColor = (GLuint)-1;
 	GLuint blendEqAlpha = (GLuint)-1;
 
-	GLRTexture *curTex[8]{};
+	GLRTexture *curTex[MAX_GL_TEXTURE_SLOTS]{};
 
 	CHECK_GL_ERROR_IF_DEBUG();
 	auto &commands = step.commands;
@@ -1282,6 +1284,17 @@ void GLQueueRunner::PerformRenderPass(const GLRStep &step, bool first, bool last
 				glDisable(GL_DITHER);
 				ditherEnabled = false;
 			}
+#ifndef USING_GLES2
+			if (c.raster.depthClampEnable) {
+				if (!depthClampEnabled) {
+					glEnable(GL_DEPTH_CLAMP);
+					depthClampEnabled = true;
+				}
+			} else if (!c.raster.depthClampEnable && depthClampEnabled) {
+				glDisable(GL_DEPTH_CLAMP);
+				depthClampEnabled = false;
+			}
+#endif
 			CHECK_GL_ERROR_IF_DEBUG();
 			break;
 		default:
@@ -1321,6 +1334,8 @@ void GLQueueRunner::PerformRenderPass(const GLRStep &step, bool first, bool last
 	if (cullEnabled)
 		glDisable(GL_CULL_FACE);
 #ifndef USING_GLES2
+	if (depthClampEnabled)
+		glDisable(GL_DEPTH_CLAMP);
 	if (!gl_extensions.IsGLES && logicEnabled) {
 		glDisable(GL_COLOR_LOGIC_OP);
 	}
@@ -1368,13 +1383,15 @@ void GLQueueRunner::PerformCopy(const GLRStep &step) {
 	_dbg_assert_(dstTex);
 
 #if defined(USING_GLES2)
-#ifndef IOS
+#if !PPSSPP_PLATFORM(IOS)
+	_assert_msg_(gl_extensions.OES_copy_image || gl_extensions.NV_copy_image || gl_extensions.EXT_copy_image, "Image copy extension expected");
 	glCopyImageSubDataOES(
 		srcTex, target, srcLevel, srcRect.x, srcRect.y, srcZ,
 		dstTex, target, dstLevel, dstPos.x, dstPos.y, dstZ,
 		srcRect.w, srcRect.h, depth);
 #endif
 #else
+	_assert_msg_(gl_extensions.ARB_copy_image || gl_extensions.NV_copy_image, "Image copy extension expected");
 	if (gl_extensions.ARB_copy_image) {
 		glCopyImageSubData(
 			srcTex, target, srcLevel, srcRect.x, srcRect.y, srcZ,
@@ -1680,7 +1697,7 @@ void GLQueueRunner::fbo_unbind() {
 	glBindFramebuffer(GL_FRAMEBUFFER, g_defaultFBO);
 #endif
 
-#ifdef IOS
+#if PPSSPP_PLATFORM(IOS)
 	bindDefaultFBO();
 #endif
 

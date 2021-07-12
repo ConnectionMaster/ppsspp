@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstdio>
 #include "Common/Data/Text/I18n.h"
 #include "Common/StringUtils.h"
 #include "Common/Serialize/Serializer.h"
@@ -11,6 +12,7 @@
 #include "Core/CwCheat.h"
 #include "Core/Config.h"
 #include "Core/Host.h"
+#include "Core/MemMapHelpers.h"
 #include "Core/MIPS/MIPS.h"
 #include "Core/ELF/ParamSFO.h"
 #include "Core/System.h"
@@ -42,14 +44,13 @@ static inline std::string TrimString(const std::string &s) {
 
 class CheatFileParser {
 public:
-	CheatFileParser(const std::string &filename, const std::string &gameID = "") {
-#if defined(_WIN32) && !defined(__MINGW32__)
-		file_.open(ConvertUTF8ToWString(filename));
-#else
-		file_.open(filename.c_str());
-#endif
-
+	CheatFileParser(const Path &filename, const std::string &gameID = "") {
+		fp_ = File::OpenCFile(filename, "rt");
 		validGameID_ = ReplaceAll(gameID, "-", "");
+	}
+	~CheatFileParser() {
+		if (fp_)
+			fclose(fp_);
 	}
 
 	bool Parse();
@@ -74,7 +75,7 @@ protected:
 	void ParseDataLine(const std::string &line, CheatCodeFormat format);
 	bool ValidateGameID(const std::string &gameID);
 
-	std::ifstream file_;
+	FILE *fp_ = nullptr;
 	std::string validGameID_;
 
 	int line_ = 0;
@@ -91,10 +92,13 @@ protected:
 };
 
 bool CheatFileParser::Parse() {
-	for (line_ = 1; file_ && !file_.eof(); ++line_) {
-		std::string line;
-		getline(file_, line, '\n');
-		line = TrimString(line);
+	for (line_ = 1; fp_ && !feof(fp_); ++line_) {
+		char temp[2048];
+		char *tempLine = fgets(temp, sizeof(temp), fp_);
+		if (!tempLine)
+			continue;
+
+		std::string line = TrimString(tempLine);
 
 		// Minimum length 5 is shortest possible _ lines name of the game "_G N+"
 		// and a minimum of 1 displayable character in cheat name string "_C0 1"
@@ -248,16 +252,9 @@ static void __CheatStop() {
 static void __CheatStart() {
 	__CheatStop();
 
-	std::string realGameID = g_paramSFO.GetValueString("DISC_ID");
-	std::string gameID = realGameID;
-	const std::string gamePath = PSP_CoreParameter().fileToStart;
-	const bool badGameSFO = realGameID.empty() || !g_paramSFO.GetValueInt("DISC_TOTAL");
-	if (badGameSFO && gamePath.find("/PSP/GAME/") != std::string::npos) {
-		gameID = g_paramSFO.GenerateFakeID(gamePath);
-	}
-
-	cheatEngine = new CWCheatEngine(gameID);
+	cheatEngine = new CWCheatEngine(g_paramSFO.GetDiscID());
 	// This only generates ini files on boot, let's leave homebrew ini file for UI.
+	std::string realGameID = g_paramSFO.GetValueString("DISC_ID");
 	if (!realGameID.empty()) {
 		cheatEngine->CreateCheatFile();
 	}
@@ -301,6 +298,8 @@ void __CheatShutdown() {
 void __CheatDoState(PointerWrap &p) {
 	auto s = p.Section("CwCheat", 0, 2);
 	if (!s) {
+		CheatEvent = -1;
+		CoreTiming::RestoreRegisterEvent(CheatEvent, "CheatEvent", &hleCheat);
 		return;
 	}
 
@@ -357,7 +356,7 @@ void hleCheat(u64 userdata, int cyclesLate) {
 }
 
 CWCheatEngine::CWCheatEngine(const std::string &gameID) : gameID_(gameID) {
-	filename_ = GetSysDirectory(DIRECTORY_CHEATS) + gameID_ + ".ini";
+	filename_ = GetSysDirectory(DIRECTORY_CHEATS) / (gameID_ + ".ini");
 }
 
 void CWCheatEngine::CreateCheatFile() {
@@ -376,7 +375,7 @@ void CWCheatEngine::CreateCheatFile() {
 	}
 }
 
-std::string CWCheatEngine::CheatFilename() {
+Path CWCheatEngine::CheatFilename() {
 	return filename_;
 }
 
@@ -785,9 +784,13 @@ CheatOperation CWCheatEngine::InterpretNextOp(const CheatCode &cheat, size_t &i)
 		return InterpretNextCwCheat(cheat, i);
 	else if (cheat.fmt == CheatCodeFormat::TEMPAR)
 		return InterpretNextTempAR(cheat, i);
-	else
-		_assert_(false);
-	return { CheatOp::Invalid };
+	else {
+		// This shouldn't happen, but apparently does: #14082
+		// Either I'm missing a path or we have memory corruption.
+		// Not sure whether to log here though, feels like we could end up with a
+		// ton of logspam...
+		return { CheatOp::Invalid };
+	}
 }
 
 void CWCheatEngine::ApplyMemoryOperator(const CheatOperation &op, uint32_t(*oper)(uint32_t, uint32_t)) {
@@ -918,7 +921,7 @@ void CWCheatEngine::ExecuteOp(const CheatOperation &op, const CheatCode &cheat, 
 			InvalidateICache(op.addr, op.val);
 			InvalidateICache(op.copyBytesFrom.destAddr, op.val);
 
-			Memory::MemcpyUnchecked(op.copyBytesFrom.destAddr, op.addr, op.val);
+			Memory::Memcpy(op.copyBytesFrom.destAddr, op.addr, op.val, "CwCheat");
 		}
 		break;
 
@@ -953,8 +956,7 @@ void CWCheatEngine::ExecuteOp(const CheatOperation &op, const CheatCode &cheat, 
 			auto shaderChain = GetFullPostShadersChain(g_Config.vPostShaderNames);
 			if (op.PostShaderUniform.shader < shaderChain.size()) {
 				std::string shaderName = shaderChain[op.PostShaderUniform.shader]->section;
-				if (shaderName != "Off")
-					g_Config.mPostShaderSetting[StringFromFormat("%sSettingValue%d", shaderName.c_str(), op.PostShaderUniform.uniform + 1)] = op.PostShaderUniform.value.f;
+				g_Config.mPostShaderSetting[StringFromFormat("%sSettingValue%d", shaderName.c_str(), op.PostShaderUniform.uniform + 1)] = op.PostShaderUniform.value.f;
 			}
 		}
 		break;
@@ -969,21 +971,19 @@ void CWCheatEngine::ExecuteOp(const CheatOperation &op, const CheatCode &cheat, 
 				} value;
 				value.u = Memory::Read_U32(op.addr);
 				std::string shaderName = shaderChain[op.PostShaderUniform.shader]->section;
-				if (shaderName != "Off") {
-					switch (op.PostShaderUniform.format) {
-					case 0:
-						g_Config.mPostShaderSetting[StringFromFormat("%sSettingValue%d", shaderName.c_str(), op.PostShaderUniform.uniform + 1)] = value.u & 0x000000FF;
-						break;
-					case 1:
-						g_Config.mPostShaderSetting[StringFromFormat("%sSettingValue%d", shaderName.c_str(), op.PostShaderUniform.uniform + 1)] = value.u & 0x0000FFFF;
-						break;
-					case 2:
-						g_Config.mPostShaderSetting[StringFromFormat("%sSettingValue%d", shaderName.c_str(), op.PostShaderUniform.uniform + 1)] = value.u;
-						break;
-					case 3:
-						g_Config.mPostShaderSetting[StringFromFormat("%sSettingValue%d", shaderName.c_str(), op.PostShaderUniform.uniform + 1)] = value.f;
-						break;
-					}
+				switch (op.PostShaderUniform.format) {
+				case 0:
+					g_Config.mPostShaderSetting[StringFromFormat("%sSettingValue%d", shaderName.c_str(), op.PostShaderUniform.uniform + 1)] = value.u & 0x000000FF;
+					break;
+				case 1:
+					g_Config.mPostShaderSetting[StringFromFormat("%sSettingValue%d", shaderName.c_str(), op.PostShaderUniform.uniform + 1)] = value.u & 0x0000FFFF;
+					break;
+				case 2:
+					g_Config.mPostShaderSetting[StringFromFormat("%sSettingValue%d", shaderName.c_str(), op.PostShaderUniform.uniform + 1)] = value.u;
+					break;
+				case 3:
+					g_Config.mPostShaderSetting[StringFromFormat("%sSettingValue%d", shaderName.c_str(), op.PostShaderUniform.uniform + 1)] = value.f;
+					break;
 				}
 			}
 		}
@@ -1100,7 +1100,7 @@ void CWCheatEngine::ExecuteOp(const CheatOperation &op, const CheatCode &cheat, 
 						if (Memory::IsValidRange(dstAddr, val) && Memory::IsValidRange(srcAddr, val)) {
 							InvalidateICache(dstAddr, val);
 							InvalidateICache(srcAddr, val);
-							Memory::MemcpyUnchecked(dstAddr, srcAddr, val);
+							Memory::Memcpy(dstAddr, srcAddr, val, "CwCheat");
 						}
 						// Don't perform any further action.
 						type = -1;

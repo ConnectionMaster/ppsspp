@@ -300,7 +300,7 @@ COORD ConsoleListener::GetCoordinates(int BytesRead, int BufferWidth)
 
 unsigned int WINAPI ConsoleListener::RunThread(void *lpParam)
 {
-	setCurrentThreadName("Console");
+	SetCurrentThreadName("Console");
 	ConsoleListener *consoleLog = (ConsoleListener *)lpParam;
 	consoleLog->LogWriterThread();
 	return 0;
@@ -517,8 +517,6 @@ void ConsoleListener::PixelSpace(int Left, int Top, int Width, int Height, bool 
 	// Check size
 	if (Width < 8 || Height < 12) return;
 
-	bool DBef = true;
-	bool DAft = true;
 	std::string SLog = "";
 
 	// Get console info

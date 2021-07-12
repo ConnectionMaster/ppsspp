@@ -35,6 +35,7 @@
 #include "Common/System/System.h"
 #include "Common/GPU/OpenGL/GLFeatures.h"
 #include "Common/Math/math_util.h"
+#include "Common/Profiler/Profiler.h"
 
 #include "QtMain.h"
 #include "Common/Data/Text/I18n.h"
@@ -224,6 +225,8 @@ bool System_GetPropertyBool(SystemProperty prop) {
 #else
 		return false;
 #endif
+	case SYSPROP_CAN_JIT:
+		return true;
 	default:
 		return false;
 	}
@@ -317,7 +320,7 @@ static int mainInternal(QApplication &a) {
 }
 
 void MainUI::EmuThreadFunc() {
-	setCurrentThreadName("Emu");
+	SetCurrentThreadName("Emu");
 
 	// There's no real requirement that NativeInit happen on this thread, though it can't hurt...
 	// We just call the update/render loop here. NativeInitGraphics should be here though.
@@ -525,7 +528,7 @@ bool MainUI::event(QEvent *e) {
 			QString fileName = QFileDialog::getOpenFileName(nullptr, "Load ROM", g_Config.currentDirectory.c_str(), "PSP ROMs (*.iso *.cso *.pbp *.elf *.zip *.ppdmp)");
 			if (QFile::exists(fileName)) {
 				QDir newPath;
-				g_Config.currentDirectory = newPath.filePath(fileName).toStdString();
+				g_Config.currentDirectory = Path(newPath.filePath(fileName).toStdString());
 				g_Config.Save("browseFileEvent");
 
 				NativeMessageReceived("boot", fileName.toStdString().c_str());
@@ -689,6 +692,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	PROFILE_INIT();
 	glslang::InitializeProcess();
 #if defined(Q_OS_LINUX)
 	QApplication::setAttribute(Qt::AA_X11InitThreads, true);

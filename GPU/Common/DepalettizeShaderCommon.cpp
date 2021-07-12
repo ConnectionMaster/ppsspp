@@ -25,6 +25,7 @@
 #include "Common/Log.h"
 #include "Core/Reporting.h"
 #include "GPU/GPUState.h"
+#include "GPU/Common/GPUStateUtils.h"
 #include "GPU/Common/DepalettizeShaderCommon.h"
 
 #define WRITE p+=sprintf
@@ -71,6 +72,12 @@ void GenerateDepalShader300(char *buffer, GEBufferFormat pixelFormat, ShaderLang
 		WRITE(p, "out vec4 fragColor0;\n");
 		WRITE(p, "uniform sampler2D tex;\n");
 		WRITE(p, "uniform sampler2D pal;\n");
+
+		if (pixelFormat == GE_FORMAT_DEPTH16) {
+			DepthScaleFactors factors = GetDepthScaleFactors();
+			WRITE(p, "const float z_scale = %f;\n", factors.scale);
+			WRITE(p, "const float z_offset = %f;\n", factors.offset);
+		}
 	}
 
 	if (language == HLSL_D3D11) {
@@ -292,7 +299,7 @@ void GenerateDepalShaderFloat(char *buffer, GEBufferFormat pixelFormat, ShaderLa
 			WRITE(p, "precision mediump float;\n");
 		} else {
 			WRITE(p, "#version %d\n", gl_extensions.GLSLVersion());
-			if (gl_extensions.VersionGEThan(3, 3)) {
+			if (gl_extensions.VersionGEThan(3, 0, 0)) {
 				WRITE(p, "#define gl_FragColor fragColor0\n");
 				WRITE(p, "out vec4 fragColor0;\n");
 			}

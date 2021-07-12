@@ -27,10 +27,12 @@
 #include "Common/Data/Text/I18n.h"
 #include "Common/Data/Encoding/Utf8.h"
 #include "Common/File/FileUtil.h"
+#include "Common/StringUtils.h"
 #include "Common/System/System.h"
 #include "Common/System/NativeApp.h"
 #include "Core/Host.h"
 #include "Core/Config.h"
+#include "Core/Reporting.h"
 #include "Core/System.h"
 #include "UI/CwCheatScreen.h"
 #include "UI/EmuScreen.h"
@@ -41,7 +43,7 @@
 #include "UI/MainScreen.h"
 #include "UI/BackgroundAudio.h"
 
-GameScreen::GameScreen(const std::string &gamePath) : UIDialogScreenWithGameBackground(gamePath) {
+GameScreen::GameScreen(const Path &gamePath) : UIDialogScreenWithGameBackground(gamePath) {
 	g_BackgroundAudio.SetGame(gamePath);
 }
 
@@ -82,7 +84,7 @@ void GameScreen::CreateViews() {
 		tvTitle_->SetShadow(true);
 		infoLayout->Add(new Spacer(12));
 		// This one doesn't need to be updated.
-		infoLayout->Add(new TextView(gamePath_, ALIGN_LEFT | FLAG_WRAP_TEXT, true, new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT)))->SetShadow(true);
+		infoLayout->Add(new TextView(gamePath_.ToVisualString(), ALIGN_LEFT | FLAG_WRAP_TEXT, true, new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT)))->SetShadow(true);
 		tvGameSize_ = infoLayout->Add(new TextView("...", ALIGN_LEFT, true, new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT)));
 		tvGameSize_->SetShadow(true);
 		tvSaveDataSize_ = infoLayout->Add(new TextView("...", ALIGN_LEFT, true, new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT)));
@@ -92,12 +94,16 @@ void GameScreen::CreateViews() {
 		tvInstallDataSize_->SetVisibility(V_GONE);
 		tvRegion_ = infoLayout->Add(new TextView("", ALIGN_LEFT, true, new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT)));
 		tvRegion_->SetShadow(true);
+		tvCRC_ = infoLayout->Add(new TextView("", ALIGN_LEFT, true, new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT)));
+		tvCRC_->SetShadow(true);
+		tvCRC_->SetVisibility(Reporting::HasCRC(gamePath_) ? V_VISIBLE : V_GONE);
 	} else {
 		tvTitle_ = nullptr;
 		tvGameSize_ = nullptr;
 		tvSaveDataSize_ = nullptr;
 		tvInstallDataSize_ = nullptr;
 		tvRegion_ = nullptr;
+		tvCRC_ = nullptr;
 	}
 
 	ViewGroup *rightColumn = new ScrollView(ORIENT_VERTICAL, new LinearLayoutParams(300, FILL_PARENT, actionMenuMargins));
@@ -234,6 +240,13 @@ void GameScreen::render() {
 		}
 	}
 
+	if (tvCRC_ && Reporting::HasCRC(gamePath_)) {
+		auto rp = GetI18NCategory("Reporting");
+		std::string crc = StringFromFormat("%08X", Reporting::RetrieveCRC(gamePath_));
+		tvCRC_->SetText(ReplaceAll(rp->T("FeedbackCRCValue", "Disc CRC: [VALUE]"), "[VALUE]", crc));
+		tvCRC_->SetVisibility(UI::V_VISIBLE);
+	}
+
 	if (!info->id.empty()) {
 		btnGameSettings_->SetVisibility(info->hasConfig ? UI::V_VISIBLE : UI::V_GONE);
 		btnDeleteGameConfig_->SetVisibility(info->hasConfig ? UI::V_VISIBLE : UI::V_GONE);
@@ -279,8 +292,8 @@ UI::EventReturn GameScreen::OnGameSettings(UI::EventParams &e) {
 	std::shared_ptr<GameInfo> info = g_gameInfoCache->GetInfo(NULL, gamePath_, GAMEINFO_WANTBG | GAMEINFO_WANTSIZE);
 	if (info && info->paramSFOLoaded) {
 		std::string discID = info->paramSFO.GetValueString("DISC_ID");
-		if ((discID.empty() || !info->disc_total) && gamePath_.find("/PSP/GAME/") != std::string::npos)
-			discID = g_paramSFO.GenerateFakeID(gamePath_);
+		if ((discID.empty() || !info->disc_total) && gamePath_.FilePathContains("PSP/GAME/"))
+			discID = g_paramSFO.GenerateFakeID(gamePath_.ToString());
 		screenManager()->push(new GameSettingsScreen(gamePath_, discID, true));
 	}
 	return UI::EVENT_DONE;
@@ -337,16 +350,16 @@ void GameScreen::CallbackDeleteGame(bool yes) {
 UI::EventReturn GameScreen::OnCreateShortcut(UI::EventParams &e) {
 	std::shared_ptr<GameInfo> info = g_gameInfoCache->GetInfo(NULL, gamePath_, 0);
 	if (info) {
-		host->CreateDesktopShortcut(gamePath_, info->GetTitle());
+		host->CreateDesktopShortcut(gamePath_.ToString(), info->GetTitle());
 	}
 	return UI::EVENT_DONE;
 }
 
-bool GameScreen::isRecentGame(const std::string &gamePath) {
+bool GameScreen::isRecentGame(const Path &gamePath) {
 	if (g_Config.iMaxRecent <= 0)
 		return false;
 
-	const std::string resolved = File::ResolvePath(gamePath);
+	const std::string resolved = File::ResolvePath(gamePath.ToString());
 	for (auto it = g_Config.recentIsos.begin(); it != g_Config.recentIsos.end(); ++it) {
 		const std::string recent = File::ResolvePath(*it);
 		if (resolved == recent)
@@ -356,14 +369,14 @@ bool GameScreen::isRecentGame(const std::string &gamePath) {
 }
 
 UI::EventReturn GameScreen::OnRemoveFromRecent(UI::EventParams &e) {
-	g_Config.RemoveRecent(gamePath_);
+	g_Config.RemoveRecent(gamePath_.ToString());
 	screenManager()->switchScreen(new MainScreen());
 	return UI::EVENT_DONE;
 }
 
 class SetBackgroundPopupScreen : public PopupScreen {
 public:
-	SetBackgroundPopupScreen(const std::string &title, const std::string &gamePath);
+	SetBackgroundPopupScreen(const std::string &title, const Path &gamePath);
 
 protected:
 	bool FillVertical() const override { return false; }
@@ -372,7 +385,7 @@ protected:
 	void update() override;
 
 private:
-	std::string gamePath_;
+	Path gamePath_;
 	double timeStart_;
 	double timeDone_ = 0.0;
 
@@ -384,7 +397,7 @@ private:
 	Status status_ = Status::PENDING;
 };
 
-SetBackgroundPopupScreen::SetBackgroundPopupScreen(const std::string &title, const std::string &gamePath)
+SetBackgroundPopupScreen::SetBackgroundPopupScreen(const std::string &title, const Path &gamePath)
 	: PopupScreen(title), gamePath_(gamePath) {
 	timeStart_ = time_now_d();
 }
@@ -407,8 +420,8 @@ void SetBackgroundPopupScreen::update() {
 		}
 
 		if (pic) {
-			const std::string bgPng = GetSysDirectory(DIRECTORY_SYSTEM) + "background.png";
-			writeStringToFile(false, pic->data, bgPng.c_str());
+			const Path bgPng = GetSysDirectory(DIRECTORY_SYSTEM) / "background.png";
+			File::WriteStringToFile(false, pic->data, bgPng);
 		}
 
 		NativeMessageReceived("bgImage_updated", "");

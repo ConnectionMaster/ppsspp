@@ -88,6 +88,9 @@
     <Filter Include="Ext\libzip">
       <UniqueIdentifier>{0201ff27-4fa8-4cf3-bbb9-accfdc0c7046}</UniqueIdentifier>
     </Filter>
+    <Filter Include="MIPS\fake">
+      <UniqueIdentifier>{678fa299-0ff7-4983-982d-2da47b52e238}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ELF\ElfReader.cpp">
@@ -797,9 +800,6 @@
     <ClCompile Include="..\ext\jpge\jpge.cpp">
       <Filter>Ext\jpge</Filter>
     </ClCompile>
-    <ClCompile Include="..\ext\libzip\mkstemp.c">
-      <Filter>Ext\libzip</Filter>
-    </ClCompile>
     <ClCompile Include="..\ext\libzip\zip_add.c">
       <Filter>Ext\libzip</Filter>
     </ClCompile>
@@ -813,12 +813,6 @@
       <Filter>Ext\libzip</Filter>
     </ClCompile>
     <ClCompile Include="..\ext\libzip\zip_dirent.c">
-      <Filter>Ext\libzip</Filter>
-    </ClCompile>
-    <ClCompile Include="..\ext\libzip\zip_entry_free.c">
-      <Filter>Ext\libzip</Filter>
-    </ClCompile>
-    <ClCompile Include="..\ext\libzip\zip_entry_new.c">
       <Filter>Ext\libzip</Filter>
     </ClCompile>
     <ClCompile Include="..\ext\libzip\zip_err_str.c">
@@ -857,9 +851,6 @@
     <ClCompile Include="..\ext\libzip\zip_file_strerror.c">
       <Filter>Ext\libzip</Filter>
     </ClCompile>
-    <ClCompile Include="..\ext\libzip\zip_filerange_crc.c">
-      <Filter>Ext\libzip</Filter>
-    </ClCompile>
     <ClCompile Include="..\ext\libzip\zip_fopen.c">
       <Filter>Ext\libzip</Filter>
     </ClCompile>
@@ -867,9 +858,6 @@
       <Filter>Ext\libzip</Filter>
     </ClCompile>
     <ClCompile Include="..\ext\libzip\zip_fread.c">
-      <Filter>Ext\libzip</Filter>
-    </ClCompile>
-    <ClCompile Include="..\ext\libzip\zip_free.c">
       <Filter>Ext\libzip</Filter>
     </ClCompile>
     <ClCompile Include="..\ext\libzip\zip_get_archive_comment.c">
@@ -920,12 +908,6 @@
     <ClCompile Include="..\ext\libzip\zip_source_buffer.c">
       <Filter>Ext\libzip</Filter>
     </ClCompile>
-    <ClCompile Include="..\ext\libzip\zip_source_file.c">
-      <Filter>Ext\libzip</Filter>
-    </ClCompile>
-    <ClCompile Include="..\ext\libzip\zip_source_filep.c">
-      <Filter>Ext\libzip</Filter>
-    </ClCompile>
     <ClCompile Include="..\ext\libzip\zip_source_free.c">
       <Filter>Ext\libzip</Filter>
     </ClCompile>
@@ -970,6 +952,231 @@
     </ClCompile>
     <ClCompile Include="Debugger\WebSocket\InputBroadcaster.cpp">
       <Filter>Debugger\WebSocket</Filter>
+    </ClCompile>
+    <ClCompile Include="MIPS\fake\FakeJit.cpp">
+      <Filter>MIPS\fake</Filter>
+    </ClCompile>
+    <ClCompile Include="Debugger\MemBlockInfo.cpp">
+      <Filter>Debugger</Filter>
+    </ClCompile>
+    <ClCompile Include="Debugger\WebSocket\MemoryInfoSubscriber.cpp">
+      <Filter>Debugger\WebSocket</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_utf-8.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_string.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_zip_new.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_window.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_write.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_tell.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_tell_write.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_supports.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_stat.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_remove.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_rollback_write.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_seek.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_seek_write.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_read.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_layered.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_open.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_pkware_decode.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_pkware_encode.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_get_file_attributes.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_is_deleted.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_file_win32_utf16.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_file_win32_utf8.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_file_win32_ansi.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_file_win32_named.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_file_win32.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_file_stdio.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_file_common.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_error.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_crc.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_compress.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_commit_write.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_close.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_call.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_begin_write_cloning.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_begin_write.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_source_accept_empty.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_set_file_compression.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_set_default_password.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_progress.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_pkware.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_mkstempm.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_libzip_version.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_io_util.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_hash.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_get_num_entries.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_get_encryption_implementation.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_ftell.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_fseek.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_fopen_index_encrypted.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_fopen_encrypted.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_file_set_mtime.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_file_set_external_attributes.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_file_set_encryption.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_file_set_comment.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_file_replace.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_file_rename.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_file_get_external_attributes.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_file_get_comment.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_file_add.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_fdopen.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_extra_field_api.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_extra_field.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_entry.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_discard.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_dir_add.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_buffer.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_algorithm_deflate.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_add_entry.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_random_uwp.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\ext\libzip\zip_random_win32.c">
+      <Filter>Ext\libzip</Filter>
+    </ClCompile>
+    <ClCompile Include="Debugger\WebSocket\ReplaySubscriber.cpp">
+      <Filter>Debugger\WebSocket</Filter>
+    </ClCompile>
+    <ClCompile Include="ControlMapper.cpp">
+      <Filter>Core</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -1660,6 +1867,36 @@
     </ClInclude>
     <ClInclude Include="Debugger\WebSocket\InputBroadcaster.h">
       <Filter>Debugger\WebSocket</Filter>
+    </ClInclude>
+    <ClInclude Include="MIPS\fake\FakeJit.h">
+      <Filter>MIPS\fake</Filter>
+    </ClInclude>
+    <ClInclude Include="Debugger\MemBlockInfo.h">
+      <Filter>Debugger</Filter>
+    </ClInclude>
+    <ClInclude Include="Debugger\WebSocket\MemoryInfoSubscriber.h">
+      <Filter>Debugger\WebSocket</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ext\libzip\zip_source_file_win32.h">
+      <Filter>Ext\libzip</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ext\libzip\zip_source_file_stdio.h">
+      <Filter>Ext\libzip</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ext\libzip\zip_source_file.h">
+      <Filter>Ext\libzip</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ext\libzip\compat.h">
+      <Filter>Ext\libzip</Filter>
+    </ClInclude>
+    <ClInclude Include="..\ext\libzip\zipconf.h">
+      <Filter>Ext\libzip</Filter>
+    </ClInclude>
+    <ClInclude Include="Debugger\WebSocket\ReplaySubscriber.h">
+      <Filter>Debugger\WebSocket</Filter>
+    </ClInclude>
+    <ClInclude Include="ControlMapper.h">
+      <Filter>Core</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

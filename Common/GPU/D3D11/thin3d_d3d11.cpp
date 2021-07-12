@@ -8,16 +8,16 @@
 #endif
 #include "Common/System/Display.h"
 
+#include "Common/Data/Convert/ColorConv.h"
 #include "Common/Data/Convert/SmallDataConvert.h"
 #include "Common/Data/Encoding/Utf8.h"
-#include "Common/ColorConv.h"
 #include "Common/Log.h"
 
 #include <cfloat>
-#include <D3DCommon.h>
+#include <D3Dcommon.h>
 #include <d3d11.h>
 #include <d3d11_1.h>
-#include <d3dcompiler.h>
+#include <D3Dcompiler.h>
 
 #ifdef __MINGW32__
 #undef __uuidof
@@ -25,6 +25,8 @@
 #endif
 
 namespace Draw {
+
+static constexpr int MAX_BOUND_TEXTURES = 8;
 
 // A problem is that we can't get the D3Dcompiler.dll without using a later SDK than 7.1, which was the last that
 // supported XP. A possible solution might be here:
@@ -68,7 +70,7 @@ public:
 
 	void CopyFramebufferImage(Framebuffer *src, int level, int x, int y, int z, Framebuffer *dst, int dstLevel, int dstX, int dstY, int dstZ, int width, int height, int depth, int channelBits, const char *tag) override;
 	bool BlitFramebuffer(Framebuffer *src, int srcX1, int srcY1, int srcX2, int srcY2, Framebuffer *dst, int dstX1, int dstY1, int dstX2, int dstY2, int channelBits, FBBlitFilter filter, const char *tag) override;
-	bool CopyFramebufferToMemorySync(Framebuffer *src, int channelBits, int x, int y, int w, int h, Draw::DataFormat format, void *pixels, int pixelStride, const char *tag);
+	bool CopyFramebufferToMemorySync(Framebuffer *src, int channelBits, int x, int y, int w, int h, Draw::DataFormat format, void *pixels, int pixelStride, const char *tag) override;
 
 	// These functions should be self explanatory.
 	void BindFramebufferAsRenderTarget(Framebuffer *fbo, const RenderPassInfo &rp, const char *tag) override;
@@ -110,7 +112,7 @@ public:
 	void Draw(int vertexCount, int offset) override;
 	void DrawIndexed(int vertexCount, int offset) override;
 	void DrawUP(const void *vdata, int vertexCount) override;
-	void Clear(int mask, uint32_t colorval, float depthVal, int stencilVal);
+	void Clear(int mask, uint32_t colorval, float depthVal, int stencilVal) override;
 
 	void BeginFrame() override;
 
@@ -185,7 +187,7 @@ private:
 	ID3D11Texture2D *bbDepthStencilTex_ = nullptr;
 	ID3D11DepthStencilView *bbDepthStencilView_ = nullptr;
 
-	Framebuffer *curRenderTarget_ = nullptr;
+	AutoRef<Framebuffer> curRenderTarget_;
 	ID3D11RenderTargetView *curRenderTargetView_ = nullptr;
 	ID3D11DepthStencilView *curDepthStencilView_ = nullptr;
 	// Needed to rotate stencil/viewport rectangles properly
@@ -194,12 +196,12 @@ private:
 	int curRTWidth_ = 0;
 	int curRTHeight_ = 0;
 
-	D3D11Pipeline *curPipeline_ = nullptr;
+	AutoRef<D3D11Pipeline> curPipeline_;
 	DeviceCaps caps_{};
 
-	D3D11BlendState *curBlend_ = nullptr;
-	D3D11DepthStencilState *curDepth_ = nullptr;
-	D3D11RasterState *curRaster_ = nullptr;
+	AutoRef<D3D11BlendState> curBlend_;
+	AutoRef<D3D11DepthStencilState> curDepth_;
+	AutoRef<D3D11RasterState> curRaster_;
 	ID3D11InputLayout *curInputLayout_ = nullptr;
 	ID3D11VertexShader *curVS_ = nullptr;
 	ID3D11PixelShader *curPS_ = nullptr;
@@ -229,12 +231,12 @@ private:
 };
 
 D3D11DrawContext::D3D11DrawContext(ID3D11Device *device, ID3D11DeviceContext *deviceContext, ID3D11Device1 *device1, ID3D11DeviceContext1 *deviceContext1, D3D_FEATURE_LEVEL featureLevel, HWND hWnd, std::vector<std::string> deviceList)
-	: device_(device),
+	: hWnd_(hWnd),
+		device_(device),
 		context_(deviceContext1),
 		device1_(device1),
 		context1_(deviceContext1),
 		featureLevel_(featureLevel),
-		hWnd_(hWnd),
 		deviceList_(deviceList) {
 
 	// We no longer support Windows Phone.
@@ -696,14 +698,6 @@ public:
 class D3D11Pipeline : public Pipeline {
 public:
 	~D3D11Pipeline() {
-		if (input)
-			input->Release();
-		if (blend)
-			blend->Release();
-		if (depth)
-			depth->Release();
-		if (raster)
-			raster->Release();
 		if (il)
 			il->Release();
 		if (dynamicUniforms)
@@ -716,11 +710,11 @@ public:
 		return true;
 	}
 
-	D3D11InputLayout *input = nullptr;
+	AutoRef<D3D11InputLayout> input;
 	ID3D11InputLayout *il = nullptr;
-	D3D11BlendState *blend = nullptr;
-	D3D11DepthStencilState *depth = nullptr;
-	D3D11RasterState *raster = nullptr;
+	AutoRef<D3D11BlendState> blend;
+	AutoRef<D3D11DepthStencilState> depth;
+	AutoRef<D3D11RasterState> raster;
 	ID3D11VertexShader *vs = nullptr;
 	ID3D11PixelShader *ps = nullptr;
 	ID3D11GeometryShader *gs = nullptr;
@@ -975,12 +969,6 @@ Pipeline *D3D11DrawContext::CreateGraphicsPipeline(const PipelineDesc &desc) {
 	dPipeline->depth = (D3D11DepthStencilState *)desc.depthStencil;
 	dPipeline->input = (D3D11InputLayout *)desc.inputLayout;
 	dPipeline->raster = (D3D11RasterState *)desc.raster;
-	dPipeline->blend->AddRef();
-	dPipeline->depth->AddRef();
-	if (dPipeline->input) {
-		dPipeline->input->AddRef();
-	}
-	dPipeline->raster->AddRef();
 	dPipeline->topology = primToD3D11[(int)desc.prim];
 	if (desc.uniformDesc) {
 		dPipeline->dynamicUniformsSize = desc.uniformDesc->uniformBufferSize;
@@ -991,6 +979,10 @@ Pipeline *D3D11DrawContext::CreateGraphicsPipeline(const PipelineDesc &desc) {
 		bufdesc.Usage = D3D11_USAGE_DYNAMIC;
 		bufdesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 		HRESULT hr = device_->CreateBuffer(&bufdesc, nullptr, &dPipeline->dynamicUniforms);
+		if (FAILED(hr)) {
+			dPipeline->Release();
+			return nullptr;
+		}
 	}
 
 	std::vector<D3D11ShaderModule *> shaders;
@@ -1022,8 +1014,7 @@ Pipeline *D3D11DrawContext::CreateGraphicsPipeline(const PipelineDesc &desc) {
 	}
 
 	// Can finally create the input layout
-	if (dPipeline->input) {
-		auto &inputDesc = dPipeline->input->desc;
+	if (dPipeline->input != nullptr) {
 		const std::vector<D3D11_INPUT_ELEMENT_DESC> &elements = dPipeline->input->elements;
 		HRESULT hr = device_->CreateInputLayout(elements.data(), (UINT)elements.size(), vshader->byteCode_.data(), vshader->byteCode_.size(), &dPipeline->il);
 		if (!SUCCEEDED(hr)) {
@@ -1101,7 +1092,7 @@ void D3D11DrawContext::ApplyCurrentState() {
 		curTopology_ = curPipeline_->topology;
 	}
 
-	if (curPipeline_->input) {
+	if (curPipeline_->input != nullptr) {
 		int numVBs = (int)curPipeline_->input->strides.size();
 		context_->IASetVertexBuffers(0, numVBs, nextVertexBuffers_, (UINT *)curPipeline_->input->strides.data(), (UINT *)nextVertexBufferOffsets_);
 	}
@@ -1173,6 +1164,7 @@ void D3D11DrawContext::UpdateBuffer(Buffer *buffer, const uint8_t *data, size_t 
 }
 
 void D3D11DrawContext::BindVertexBuffers(int start, int count, Buffer **buffers, int *offsets) {
+	_assert_(start + count <= ARRAY_SIZE(nextVertexBuffers_));
 	// Lazy application
 	for (int i = 0; i < count; i++) {
 		D3D11Buffer *buf = (D3D11Buffer *)buffers[i];
@@ -1339,7 +1331,8 @@ Framebuffer *D3D11DrawContext::CreateFramebuffer(const FramebufferDesc &desc) {
 
 void D3D11DrawContext::BindTextures(int start, int count, Texture **textures) {
 	// Collect the resource views from the textures.
-	ID3D11ShaderResourceView *views[8];
+	ID3D11ShaderResourceView *views[MAX_BOUND_TEXTURES];
+	_assert_(start + count <= ARRAY_SIZE(views));
 	for (int i = 0; i < count; i++) {
 		D3D11Texture *tex = (D3D11Texture *)textures[i];
 		views[i] = tex ? tex->view : nullptr;
@@ -1348,7 +1341,8 @@ void D3D11DrawContext::BindTextures(int start, int count, Texture **textures) {
 }
 
 void D3D11DrawContext::BindSamplerStates(int start, int count, SamplerState **states) {
-	ID3D11SamplerState *samplers[8];
+	ID3D11SamplerState *samplers[MAX_BOUND_TEXTURES];
+	_assert_(start + count <= ARRAY_SIZE(samplers));
 	for (int i = 0; i < count; i++) {
 		D3D11SamplerState *samp = (D3D11SamplerState *)states[i];
 		samplers[i] = samp->ss;
@@ -1375,13 +1369,13 @@ void D3D11DrawContext::Clear(int mask, uint32_t colorval, float depthVal, int st
 void D3D11DrawContext::BeginFrame() {
 	context_->OMSetRenderTargets(1, &curRenderTargetView_, curDepthStencilView_);
 
-	if (curBlend_) {
+	if (curBlend_ != nullptr) {
 		context_->OMSetBlendState(curBlend_->bs, blendFactor_, 0xFFFFFFFF);
 	}
-	if (curDepth_) {
+	if (curDepth_ != nullptr) {
 		context_->OMSetDepthStencilState(curDepth_->dss, stencilRef_);
 	}
-	if (curRaster_) {
+	if (curRaster_ != nullptr) {
 		context_->RSSetState(curRaster_->rs);
 	}
 	context_->IASetInputLayout(curInputLayout_);
@@ -1391,7 +1385,7 @@ void D3D11DrawContext::BeginFrame() {
 	if (curTopology_ != D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED) {
 		context_->IASetPrimitiveTopology(curTopology_);
 	}
-	if (curPipeline_) {
+	if (curPipeline_ != nullptr) {
 		context_->IASetVertexBuffers(0, 1, nextVertexBuffers_, (UINT *)curPipeline_->input->strides.data(), (UINT *)nextVertexBufferOffsets_);
 		context_->IASetIndexBuffer(nextIndexBuffer_, DXGI_FORMAT_R16_UINT, nextIndexBufferOffset_);
 		if (curPipeline_->dynamicUniforms) {
@@ -1488,7 +1482,6 @@ bool D3D11DrawContext::CopyFramebufferToMemorySync(Framebuffer *src, int channel
 		packDesc.MipLevels = 1;
 		packDesc.Usage = D3D11_USAGE_STAGING;
 		packDesc.SampleDesc.Count = 1;
-		D3D11_BOX srcBox{ (UINT)bx, (UINT)by, 0, (UINT)(bx + bw), (UINT)(by + bh), 1 };
 		switch (channelBits) {
 		case FB_COLOR_BIT:
 			packDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;  // TODO: fb->colorFormat;
@@ -1625,6 +1618,7 @@ void D3D11DrawContext::BindFramebufferAsRenderTarget(Framebuffer *fbo, const Ren
 }
 
 void D3D11DrawContext::BindFramebufferAsTexture(Framebuffer *fbo, int binding, FBChannel channelBit, int attachment) {
+	_assert_(binding < MAX_BOUND_TEXTURES);
 	D3D11Framebuffer *fb = (D3D11Framebuffer *)fbo;
 	switch (channelBit) {
 	case FBChannel::FB_COLOR_BIT:

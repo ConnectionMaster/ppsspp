@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <string>
 #include <cmath>
+#include <zstd.h>
 
 #include "Common/Render/TextureAtlas.h"
 
@@ -190,7 +191,7 @@ struct Image {
 			memcpy(image_data + y * width() * 4, &dat[y][0], width() * 4);
 		}
 		FILE *f = fopen(zim_name, "wb");
-		// SaveZIM takes ownership voer image_data, there's no leak.
+		// SaveZIM takes ownership over image_data, there's no leak.
 		::SaveZIM(f, width(), height(), width() * 4, zim_format | ZIM_DITHER, image_data);
 		fclose(f);
 	}
@@ -355,7 +356,10 @@ inline vector<CharRange> merge(const vector<CharRange> &a, const vector<CharRang
 
 void RasterizeFonts(const FontReferenceList &fontRefs, vector<CharRange> &ranges, float *metrics_height, Bucket *bucket) {
 	FT_Library freetype = 0;
-	assert(FT_Init_FreeType(&freetype) == 0);
+	if (FT_Init_FreeType(&freetype) != 0) {
+		printf("ERROR: Failed to init freetype\n");
+		exit(1);
+	}
 
 	vector<FT_Face> fonts;
 	fonts.resize(fontRefs.size());
@@ -367,14 +371,18 @@ void RasterizeFonts(const FontReferenceList &fontRefs, vector<CharRange> &ranges
 
 	for (size_t i = 0, n = fontRefs.size(); i < n; ++i) {
 		FT_Face &font = fonts[i];
-		if (FT_New_Face(freetype, fontRefs[i].file_.c_str(), 0, &font) != 0) {
-			printf("Failed to load font file %s\n", fontRefs[i].file_.c_str());
+		int err = FT_New_Face(freetype, fontRefs[i].file_.c_str(), 0, &font);
+		if (err != 0) {
+			printf("Failed to load font file %s (%d)\n", fontRefs[i].file_.c_str(), err);
 			printf("bailing");
-			exit(0);
+			exit(1);
 		}
 		printf("TTF info: %d glyphs, %08x flags, %d units, %d strikes\n", (int)font->num_glyphs, (int)font->face_flags, (int)font->units_per_EM, (int)font->num_fixed_sizes);
 
-		assert(FT_Set_Pixel_Sizes(font, 0, fontRefs[i].size_ * supersample) == 0);
+		if (FT_Set_Pixel_Sizes(font, 0, fontRefs[i].size_ * supersample) != 0) {
+			printf("ERROR: Failed to set font size\n");
+			exit(1);
+		}
 
 		ranges = merge(ranges, fontRefs[i].ranges_);
 		for (size_t r = 0, rn = fontRefs[i].ranges_.size(); r < rn; ++r) {
@@ -853,6 +861,30 @@ void GetLocales(const char *locales, std::vector<CharRange> &ranges)
 	std::sort(ranges.begin(), ranges.end());
 }
 
+static bool WriteCompressed(const void *src, size_t sz, size_t num, FILE *fp) {
+	size_t src_size = sz * num;
+	size_t compressed_size = ZSTD_compressBound(src_size);
+	uint8_t *compressed = new uint8_t[compressed_size];
+	compressed_size = ZSTD_compress(compressed, compressed_size, src, src_size, 22);
+	if (ZSTD_isError(compressed_size)) {
+		delete[] compressed;
+		return false;
+	}
+
+	uint32_t write_size = (uint32_t)compressed_size;
+	if (fwrite(&write_size, sizeof(uint32_t), 1, fp) != 1) {
+		delete[] compressed;
+		return false;
+	}
+	if (fwrite(compressed, 1, compressed_size, fp) != compressed_size) {
+		delete[] compressed;
+		return false;
+	}
+
+	delete[] compressed;
+	return true;
+}
+
 int main(int argc, char **argv) {
 	// initProgram(&argc, const_cast<const char ***>(&argv));
 	// /usr/share/fonts/truetype/msttcorefonts/Arial_Black.ttf
@@ -962,10 +994,10 @@ int main(int argc, char **argv) {
 	vector<Data> results = bucket.Resolve(image_width, dest);
 	if (highcolor) {
 		printf("Writing .ZIM %ix%i RGBA8888...\n", dest.width(), dest.height());
-		dest.SaveZIM(image_name.c_str(), ZIM_RGBA8888 | ZIM_ZLIB_COMPRESSED);
+		dest.SaveZIM(image_name.c_str(), ZIM_RGBA8888 | ZIM_ZSTD_COMPRESSED);
 	} else {
 		printf("Writing .ZIM %ix%i RGBA4444...\n", dest.width(), dest.height());
-		dest.SaveZIM(image_name.c_str(), ZIM_RGBA4444 | ZIM_ZLIB_COMPRESSED);
+		dest.SaveZIM(image_name.c_str(), ZIM_RGBA4444 | ZIM_ZSTD_COMPRESSED);
 	}
 
 	// Also save PNG for debugging.
@@ -981,15 +1013,16 @@ int main(int argc, char **argv) {
 		FILE *meta = fopen(meta_name.c_str(), "wb");
 		AtlasHeader header;
 		header.magic = ATLAS_MAGIC;
-		header.version = 0;
+		header.version = 1;
 		header.numFonts = (int)fonts.size();
 		header.numImages = (int)images.size();
 		fwrite(&header, 1, sizeof(header), meta);
 		// For each image
+		AtlasImage *atalas_images = new AtlasImage[images.size()];
 		for (int i = 0; i < (int)images.size(); i++) {
-			AtlasImage atlas_image = images[i].ToAtlasImage((float)dest.width(), (float)dest.height(), results);
-			fwrite(&atlas_image, 1, sizeof(atlas_image), meta);
+			atalas_images[i] = images[i].ToAtlasImage((float)dest.width(), (float)dest.height(), results);
 		}
+		WriteCompressed(atalas_images, sizeof(AtlasImage), images.size(), meta);
 		// For each font
 		for (int i = 0; i < (int)fonts.size(); i++) {
 			auto &font = fonts[i];
@@ -997,9 +1030,9 @@ int main(int argc, char **argv) {
 			AtlasFontHeader font_header = font.GetHeader();
 			fwrite(&font_header, 1, sizeof(font_header), meta);
 			auto ranges = font.GetRanges();
-			fwrite(ranges.data(), sizeof(AtlasCharRange), ranges.size(), meta);
+			WriteCompressed(ranges.data(), sizeof(AtlasCharRange), ranges.size(), meta);
 			auto chars = font.GetChars((float)dest.width(), (float)dest.height(), results);
-			fwrite(chars.data(), sizeof(AtlasChar), chars.size(), meta);
+			WriteCompressed(chars.data(), sizeof(AtlasChar), chars.size(), meta);
 		}
 		fclose(meta);
 	}

@@ -20,9 +20,6 @@
 
 #include "DSoundStream.h"
 
-// TODO: Get rid of this
-static DSoundAudioBackend *g_dsound;
-
 inline int RoundDown128(int x) {
 	return x & (~127);
 }
@@ -113,7 +110,7 @@ int DSoundAudioBackend::RunThread() {
 	dsBuffer_->Unlock(p1, num1, 0, 0);
 	totalRenderedBytes_ = -bufferSize_;
 
-	setCurrentThreadName("DSound");
+	SetCurrentThreadName("DSound");
 	currentPos_ = 0;
 	lastPos_ = 0;
 
@@ -126,7 +123,7 @@ int DSoundAudioBackend::RunThread() {
 		int numBytesToRender = RoundDown128(ModBufferSize(currentPos_ - lastPos_)); 
 
 		if (numBytesToRender >= 256) {
-			int numBytesRendered = 4 * (*callback_)(realtimeBuffer_, numBytesToRender >> 2, 16, 44100, 2);
+			int numBytesRendered = 4 * (*callback_)(realtimeBuffer_, numBytesToRender >> 2, 16, 44100);
 			//We need to copy the full buffer, regardless of what the mixer claims to have filled
 			//If we don't do this then the sound will loop if the sound stops and the mixer writes only zeroes
 			numBytesRendered = numBytesToRender;
@@ -150,7 +147,7 @@ int DSoundAudioBackend::RunThread() {
 	return 0;
 }
 
-DSoundAudioBackend::DSoundAudioBackend() : threadData_(0), ds_(nullptr) {
+DSoundAudioBackend::DSoundAudioBackend() {
 }
 
 DSoundAudioBackend::~DSoundAudioBackend() {

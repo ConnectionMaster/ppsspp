@@ -15,19 +15,20 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
 #include <algorithm>
 #include <cmath>
 
+#include "Common/Data/Convert/ColorConv.h"
 #include "Common/Profiler/Profiler.h"
-
+#include "Common/Thread/ParallelLoop.h"
 #include "Core/ThreadPools.h"
-#include "Common/ColorConv.h"
 #include "Core/Config.h"
 #include "Core/MemMap.h"
 #include "Core/Reporting.h"
+#include "Core/ThreadPools.h"
 #include "GPU/GPUState.h"
 
-#include "GPU/Common/TextureCacheCommon.h"
 #include "GPU/Common/TextureDecoder.h"
 #include "GPU/Software/SoftGpu.h"
 #include "GPU/Software/Rasterizer.h"
@@ -40,7 +41,7 @@
 namespace Rasterizer {
 
 // Only OK on x64 where our stack is aligned
-#if defined(_M_SSE) && !defined(_M_IX86)
+#if defined(_M_SSE) && !PPSSPP_ARCH(X86)
 static inline __m128 Interpolate(const __m128 &c0, const __m128 &c1, const __m128 &c2, int w0, int w1, int w2, float wsum) {
 	__m128 v = _mm_mul_ps(c0, _mm_cvtepi32_ps(_mm_set1_epi32(w0)));
 	v = _mm_add_ps(v, _mm_mul_ps(c1, _mm_cvtepi32_ps(_mm_set1_epi32(w1))));
@@ -57,7 +58,7 @@ static inline __m128i Interpolate(const __m128i &c0, const __m128i &c1, const __
 // Not sure if that should be regarded as a bug or if casting to float is a valid fix.
 
 static inline Vec4<int> Interpolate(const Vec4<int> &c0, const Vec4<int> &c1, const Vec4<int> &c2, int w0, int w1, int w2, float wsum) {
-#if defined(_M_SSE) && !defined(_M_IX86)
+#if defined(_M_SSE) && !PPSSPP_ARCH(X86)
 	return Vec4<int>(Interpolate(c0.ivec, c1.ivec, c2.ivec, w0, w1, w2, wsum));
 #else
 	return ((c0.Cast<float>() * w0 + c1.Cast<float>() * w1 + c2.Cast<float>() * w2) * wsum).Cast<int>();
@@ -65,7 +66,7 @@ static inline Vec4<int> Interpolate(const Vec4<int> &c0, const Vec4<int> &c1, co
 }
 
 static inline Vec3<int> Interpolate(const Vec3<int> &c0, const Vec3<int> &c1, const Vec3<int> &c2, int w0, int w1, int w2, float wsum) {
-#if defined(_M_SSE) && !defined(_M_IX86)
+#if defined(_M_SSE) && !PPSSPP_ARCH(X86)
 	return Vec3<int>(Interpolate(c0.ivec, c1.ivec, c2.ivec, w0, w1, w2, wsum));
 #else
 	return ((c0.Cast<float>() * w0 + c1.Cast<float>() * w1 + c2.Cast<float>() * w2) * wsum).Cast<int>();
@@ -73,7 +74,7 @@ static inline Vec3<int> Interpolate(const Vec3<int> &c0, const Vec3<int> &c1, co
 }
 
 static inline Vec2<float> Interpolate(const Vec2<float> &c0, const Vec2<float> &c1, const Vec2<float> &c2, int w0, int w1, int w2, float wsum) {
-#if defined(_M_SSE) && !defined(_M_IX86)
+#if defined(_M_SSE) && !PPSSPP_ARCH(X86)
 	return Vec2<float>(Interpolate(c0.vec, c1.vec, c2.vec, w0, w1, w2, wsum));
 #else
 	return (c0 * w0 + c1 * w1 + c2 * w2) * wsum;
@@ -81,7 +82,7 @@ static inline Vec2<float> Interpolate(const Vec2<float> &c0, const Vec2<float> &
 }
 
 static inline Vec4<float> Interpolate(const float &c0, const float &c1, const float &c2, const Vec4<float> &w0, const Vec4<float> &w1, const Vec4<float> &w2, const Vec4<float> &wsum_recip) {
-#if defined(_M_SSE) && !defined(_M_IX86)
+#if defined(_M_SSE) && !PPSSPP_ARCH(X86)
 	__m128 v = _mm_mul_ps(w0.vec, _mm_set1_ps(c0));
 	v = _mm_add_ps(v, _mm_mul_ps(w1.vec, _mm_set1_ps(c1)));
 	v = _mm_add_ps(v, _mm_mul_ps(w2.vec, _mm_set1_ps(c2)));
@@ -1084,7 +1085,7 @@ Vec4<int> TriangleEdge::Start(const ScreenCoords &v0, const ScreenCoords &v1, co
 }
 
 inline Vec4<int> TriangleEdge::StepX(const Vec4<int> &w) {
-#if defined(_M_SSE) && !defined(_M_IX86)
+#if defined(_M_SSE) && !PPSSPP_ARCH(X86)
 	return _mm_add_epi32(w.ivec, stepX.ivec);
 #else
 	return w + stepX;
@@ -1092,7 +1093,7 @@ inline Vec4<int> TriangleEdge::StepX(const Vec4<int> &w) {
 }
 
 inline Vec4<int> TriangleEdge::StepY(const Vec4<int> &w) {
-#if defined(_M_SSE) && !defined(_M_IX86)
+#if defined(_M_SSE) && !PPSSPP_ARCH(X86)
 	return _mm_add_epi32(w.ivec, stepY.ivec);
 #else
 	return w + stepY;
@@ -1100,7 +1101,7 @@ inline Vec4<int> TriangleEdge::StepY(const Vec4<int> &w) {
 }
 
 static inline Vec4<int> MakeMask(const Vec4<int> &w0, const Vec4<int> &w1, const Vec4<int> &w2, const Vec4<int> &bias0, const Vec4<int> &bias1, const Vec4<int> &bias2, const Vec4<int> &scissor) {
-#if defined(_M_SSE) && !defined(_M_IX86)
+#if defined(_M_SSE) && !PPSSPP_ARCH(X86)
 	__m128i biased0 = _mm_add_epi32(w0.ivec, bias0.ivec);
 	__m128i biased1 = _mm_add_epi32(w1.ivec, bias1.ivec);
 	__m128i biased2 = _mm_add_epi32(w2.ivec, bias2.ivec);
@@ -1112,7 +1113,7 @@ static inline Vec4<int> MakeMask(const Vec4<int> &w0, const Vec4<int> &w1, const
 }
 
 static inline bool AnyMask(const Vec4<int> &mask) {
-#if defined(_M_SSE) && !defined(_M_IX86)
+#if defined(_M_SSE) && !PPSSPP_ARCH(X86)
 	// In other words: !(mask.x < 0 && mask.y < 0 && mask.z < 0 && mask.w < 0)
 	__m128i low2 = _mm_and_si128(mask.ivec, _mm_shuffle_epi32(mask.ivec, _MM_SHUFFLE(3, 2, 3, 2)));
 	__m128i low1 = _mm_and_si128(low2, _mm_shuffle_epi32(low2, _MM_SHUFFLE(1, 1, 1, 1)));
@@ -1124,7 +1125,7 @@ static inline bool AnyMask(const Vec4<int> &mask) {
 }
 
 static inline Vec4<float> EdgeRecip(const Vec4<int> &w0, const Vec4<int> &w1, const Vec4<int> &w2) {
-#if defined(_M_SSE) && !defined(_M_IX86)
+#if defined(_M_SSE) && !PPSSPP_ARCH(X86)
 	__m128i wsum = _mm_add_epi32(w0.ivec, _mm_add_epi32(w1.ivec, w2.ivec));
 	// _mm_rcp_ps loses too much precision.
 	return _mm_div_ps(_mm_set1_ps(1.0f), _mm_cvtepi32_ps(wsum));
@@ -1321,29 +1322,32 @@ void DrawTriangle(const VertexData& v0, const VertexData& v1, const VertexData& 
 	// 32 because we do two pixels at once, and we don't want overlap.
 	int rangeY = (maxY - minY) / 32 + 1;
 	int rangeX = (maxX - minX) / 32 + 1;
+
+	const int MIN_LINES_PER_THREAD = 4;
+
 	if (rangeY >= 12 && rangeX >= rangeY * 4) {
 		if (gstate.isModeClear()) {
 			auto bound = [&](int a, int b) -> void {
 				DrawTriangleSlice<true>(v0, v1, v2, minX, minY, maxX, maxY, false, a, b);
 			};
-			GlobalThreadPool::Loop(bound, 0, rangeX);
+			ParallelRangeLoop(&g_threadManager, bound, 0, rangeX, MIN_LINES_PER_THREAD);
 		} else {
 			auto bound = [&](int a, int b) -> void {
 				DrawTriangleSlice<false>(v0, v1, v2, minX, minY, maxX, maxY, false, a, b);
 			};
-			GlobalThreadPool::Loop(bound, 0, rangeX);
+			ParallelRangeLoop(&g_threadManager, bound, 0, rangeX, MIN_LINES_PER_THREAD);
 		}
 	} else if (rangeY >= 12 && rangeX >= 12) {
 		if (gstate.isModeClear()) {
 			auto bound = [&](int a, int b) -> void {
 				DrawTriangleSlice<true>(v0, v1, v2, minX, minY, maxX, maxY, true, a, b);
 			};
-			GlobalThreadPool::Loop(bound, 0, rangeY);
+			ParallelRangeLoop(&g_threadManager, bound, 0, rangeY, MIN_LINES_PER_THREAD);
 		} else {
 			auto bound = [&](int a, int b) -> void {
 				DrawTriangleSlice<false>(v0, v1, v2, minX, minY, maxX, maxY, true, a, b);
 			};
-			GlobalThreadPool::Loop(bound, 0, rangeY);
+			ParallelRangeLoop(&g_threadManager, bound, 0, rangeY, MIN_LINES_PER_THREAD);
 		}
 	} else {
 		if (gstate.isModeClear()) {
@@ -1661,7 +1665,6 @@ void DrawLine(const VertexData &v0, const VertexData &v1)
 				if (gstate.isAntiAliasEnabled()) {
 					// TODO: This is a niave and wrong implementation.
 					DrawingCoords p0 = TransformUnit::ScreenToDrawing(ScreenCoords((int)x, (int)y, (int)z));
-					DrawingCoords p1 = TransformUnit::ScreenToDrawing(ScreenCoords((int)(x + xinc), (int)(y + yinc), (int)(z + zinc)));
 					s = ((float)p0.x + xinc / 32.0f) / 512.0f;
 					t = ((float)p0.y + yinc / 32.0f) / 512.0f;
 

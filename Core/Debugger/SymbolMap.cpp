@@ -21,6 +21,7 @@
 #pragma optimize("gty", on)
 #endif
 
+#include "ppsspp_config.h"
 #ifdef _WIN32
 #include "Common/CommonWindows.h"
 #include <WindowsX.h>
@@ -64,15 +65,16 @@ void SymbolMap::Clear() {
 	activeNeedUpdate_ = false;
 }
 
-bool SymbolMap::LoadSymbolMap(const char *filename) {
+bool SymbolMap::LoadSymbolMap(const Path &filename) {
 	Clear();  // let's not recurse the lock
 
 	std::lock_guard<std::recursive_mutex> guard(lock_);
 
+	// TODO(scoped): We're screwed here
 #if defined(_WIN32) && defined(UNICODE)
-	gzFile f = gzopen_w(ConvertUTF8ToWString(filename).c_str(), "r");
+	gzFile f = gzopen_w(filename.ToWString().c_str(), "r");
 #else
-	gzFile f = gzopen(filename, "r");
+	gzFile f = gzopen(filename.c_str(), "r");
 #endif
 
 	if (f == Z_NULL)
@@ -185,7 +187,7 @@ bool SymbolMap::LoadSymbolMap(const char *filename) {
 	return started;
 }
 
-void SymbolMap::SaveSymbolMap(const char *filename) const {
+void SymbolMap::SaveSymbolMap(const Path &filename) const {
 	std::lock_guard<std::recursive_mutex> guard(lock_);
 
 	// Don't bother writing a blank file.
@@ -194,9 +196,10 @@ void SymbolMap::SaveSymbolMap(const char *filename) const {
 	}
 
 #if defined(_WIN32) && defined(UNICODE)
-	gzFile f = gzopen_w(ConvertUTF8ToWString(filename).c_str(), "w9");
+	gzFile f = gzopen_w(filename.ToWString().c_str(), "w9");
 #else
-	gzFile f = gzopen(filename, "w9");
+	// TODO(scoped): Use gzdopen? If we care, otherwise just compress into a buffer.
+	gzFile f = gzopen(filename.c_str(), "w9");
 #endif
 
 	if (f == Z_NULL)
@@ -221,7 +224,7 @@ void SymbolMap::SaveSymbolMap(const char *filename) const {
 	gzclose(f);
 }
 
-bool SymbolMap::LoadNocashSym(const char *filename) {
+bool SymbolMap::LoadNocashSym(const Path &filename) {
 	std::lock_guard<std::recursive_mutex> guard(lock_);
 	FILE *f = File::OpenCFile(filename, "r");
 	if (!f)
@@ -279,7 +282,7 @@ bool SymbolMap::LoadNocashSym(const char *filename) {
 	return true;
 }
 
-void SymbolMap::SaveNocashSym(const char *filename) const {
+void SymbolMap::SaveNocashSym(const Path &filename) const {
 	std::lock_guard<std::recursive_mutex> guard(lock_);
 
 	// Don't bother writing a blank file.
@@ -1010,6 +1013,7 @@ void SymbolMap::GetLabels(std::vector<LabelDefinition> &dest) {
 		LabelDefinition entry;
 		entry.value = it->first;
 		entry.name = ConvertUTF8ToWString(it->second.name);
+		std::transform(entry.name.begin(), entry.name.end(), entry.name.begin(), ::towlower);
 		dest.push_back(entry);
 	}
 }
@@ -1045,7 +1049,6 @@ void SymbolMap::FillSymbolListBox(HWND listbox,SymbolType symType) {
 			SendMessage(listbox, LB_INITSTORAGE, (WPARAM)activeFunctions.size(), (LPARAM)activeFunctions.size() * 30);
 
 			for (auto it = activeFunctions.begin(), end = activeFunctions.end(); it != end; ++it) {
-				const FunctionEntry& entry = it->second;
 				const char* name = GetLabelName(it->first);
 				if (name != NULL)
 					wsprintf(temp, L"%S", name);
@@ -1069,7 +1072,6 @@ void SymbolMap::FillSymbolListBox(HWND listbox,SymbolType symType) {
 			}
 
 			for (auto it = activeData.begin(), end = activeData.end(); it != end; ++it) {
-				const DataEntry& entry = it->second;
 				const char* name = GetLabelName(it->first);
 
 				if (name != NULL)

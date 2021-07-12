@@ -158,7 +158,7 @@ void CompatRatingChoice::SetupChoices() {
 	AddChoice(4, rp->T("Nothing"));
 }
 
-ReportScreen::ReportScreen(const std::string &gamePath)
+ReportScreen::ReportScreen(const Path &gamePath)
 	: UIDialogScreenWithGameBackground(gamePath) {
 	enableReporting_ = Reporting::IsEnabled();
 	ratingEnabled_ = enableReporting_;
@@ -168,12 +168,12 @@ void ReportScreen::postRender() {
 	// We do this after render because we need it to be within the frame (so the screenshot works).
 	// We could do it mid frame, but then we have to reapply viewport/scissor.
 	if (!tookScreenshot_) {
-		std::string path = GetSysDirectory(DIRECTORY_SCREENSHOT);
+		Path path = GetSysDirectory(DIRECTORY_SCREENSHOT);
 		if (!File::Exists(path)) {
 			File::CreateDir(path);
 		}
-		screenshotFilename_ = path + ".reporting.jpg";
-		if (TakeGameScreenshot(screenshotFilename_.c_str(), ScreenshotFormat::JPG, SCREENSHOT_DISPLAY, nullptr, nullptr, 4)) {
+		screenshotFilename_ = path / ".reporting.jpg";
+		if (TakeGameScreenshot(screenshotFilename_, ScreenshotFormat::JPG, SCREENSHOT_DISPLAY, nullptr, nullptr, 4)) {
 			// Redo the views already, now with a screenshot included.
 			RecreateViews();
 		} else {
@@ -195,6 +195,7 @@ void ReportScreen::update() {
 		}
 	}
 	UIDialogScreenWithGameBackground::update();
+	UpdateCRCInfo();
 }
 
 void ReportScreen::resized() {
@@ -269,7 +270,7 @@ void ReportScreen::CreateViews() {
 	}
 
 #ifdef MOBILE_DEVICE
-	if (!Core_GetPowerSaving()) {
+	if (!Core_GetPowerSaving() && !Reporting::HasCRC(gamePath_)) {
 		auto crcWarning = new TextView(rp->T("FeedbackIncludeCRC", "Note: Battery will be used to send a disc CRC"), FLAG_WRAP_TEXT, false, new LinearLayoutParams(Margins(12, 5, 0, 5)));
 		crcWarning->SetShadow(true);
 		crcWarning->SetEnabledPtr(&enableReporting_);
@@ -277,9 +278,14 @@ void ReportScreen::CreateViews() {
 	}
 #endif
 
+	crcInfo_ = new TextView("", FLAG_WRAP_TEXT, false, new LinearLayoutParams(Margins(12, 5, 0, 5)));
+	crcInfo_->SetShadow(true);
+	crcInfo_->SetVisibility(V_GONE);
+	leftColumnItems->Add(crcInfo_);
+
 	if (tookScreenshot_ && !screenshotFilename_.empty()) {
 		leftColumnItems->Add(new CheckBox(&includeScreenshot_, rp->T("FeedbackIncludeScreen", "Include a screenshot")))->SetEnabledPtr(&enableReporting_);
-		screenshot_ = leftColumnItems->Add(new AsyncImageFileView(screenshotFilename_, IS_KEEP_ASPECT, nullptr, new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT, Margins(12, 0))));
+		screenshot_ = leftColumnItems->Add(new AsyncImageFileView(screenshotFilename_, IS_KEEP_ASPECT, new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT, Margins(12, 0))));
 	} else {
 		if (tookScreenshot_) {
 			includeScreenshot_ = false;
@@ -292,7 +298,7 @@ void ReportScreen::CreateViews() {
 	overallDescription_->SetShadow(true);
 
 	UI::Orientation ratingsOrient = leftColumnWidth >= 750.0f ? ORIENT_HORIZONTAL : ORIENT_VERTICAL;
-	UI::LinearLayout *ratingsHolder = new LinearLayout(ratingsOrient, new LinearLayoutParams(WRAP_CONTENT, WRAP_CONTENT));
+	UI::LinearLayout *ratingsHolder = new LinearLayoutList(ratingsOrient, new LinearLayoutParams(WRAP_CONTENT, WRAP_CONTENT));
 	leftColumnItems->Add(ratingsHolder);
 	ratingsHolder->Add(new RatingChoice("Graphics", &graphics_))->SetEnabledPtr(&ratingEnabled_)->OnChoice.Handle(this, &ReportScreen::HandleChoice);
 	ratingsHolder->Add(new RatingChoice("Speed", &speed_))->SetEnabledPtr(&ratingEnabled_)->OnChoice.Handle(this, &ReportScreen::HandleChoice);
@@ -300,6 +306,8 @@ void ReportScreen::CreateViews() {
 
 	rightColumnItems->SetSpacing(0.0f);
 	rightColumnItems->Add(new Choice(rp->T("Open Browser")))->OnClick.Handle(this, &ReportScreen::HandleBrowser);
+	showCrcButton_ = new Choice(rp->T("Show disc CRC"));
+	rightColumnItems->Add(showCrcButton_)->OnClick.Handle(this, &ReportScreen::HandleShowCRC);
 	submit_ = new Choice(rp->T("Submit Feedback"));
 	rightColumnItems->Add(submit_)->OnClick.Handle(this, &ReportScreen::HandleSubmit);
 	UpdateSubmit();
@@ -314,10 +322,30 @@ void ReportScreen::CreateViews() {
 
 	leftColumn->Add(leftColumnItems);
 	rightColumn->Add(rightColumnItems);
+
+	UpdateCRCInfo();
 }
 
 void ReportScreen::UpdateSubmit() {
 	submit_->SetEnabled(enableReporting_ && overall_ != ReportingOverallScore::INVALID && graphics_ >= 0 && speed_ >= 0 && gameplay_ >= 0);
+}
+
+void ReportScreen::UpdateCRCInfo() {
+	auto rp = GetI18NCategory("Reporting");
+	std::string updated;
+
+	if (Reporting::HasCRC(gamePath_)) {
+		std::string crc = StringFromFormat("%08X", Reporting::RetrieveCRC(gamePath_));
+		updated = ReplaceAll(rp->T("FeedbackCRCValue", "Disc CRC: [VALUE]"), "[VALUE]", crc);
+	} else if (showCRC_) {
+		updated = rp->T("FeedbackCRCCalculating", "Disc CRC: Calculating...");
+	}
+
+	if (!updated.empty()) {
+		crcInfo_->SetText(updated);
+		crcInfo_->SetVisibility(V_VISIBLE);
+		showCrcButton_->SetEnabled(false);
+	}
 }
 
 void ReportScreen::UpdateOverallDescription() {
@@ -353,7 +381,7 @@ EventReturn ReportScreen::HandleSubmit(EventParams &e) {
 		g_Config.Save("ReportScreen::HandleSubmit");
 	}
 
-	std::string filename = tookScreenshot_ && includeScreenshot_ ? screenshotFilename_ : "";
+	std::string filename = tookScreenshot_ && includeScreenshot_ ? screenshotFilename_.ToString() : "";
 	Reporting::ReportCompatibility(compat, graphics_ + 1, speed_ + 1, gameplay_ + 1, filename);
 	TriggerFinish(DR_OK);
 	screenManager()->push(new ReportFinishScreen(gamePath_, overall_));
@@ -366,7 +394,13 @@ EventReturn ReportScreen::HandleBrowser(EventParams &e) {
 	return EVENT_DONE;
 }
 
-ReportFinishScreen::ReportFinishScreen(const std::string &gamePath, ReportingOverallScore score)
+EventReturn ReportScreen::HandleShowCRC(EventParams &e) {
+	Reporting::QueueCRC(gamePath_);
+	showCRC_ = true;
+	return EVENT_DONE;
+}
+
+ReportFinishScreen::ReportFinishScreen(const Path &gamePath, ReportingOverallScore score)
 	: UIDialogScreenWithGameBackground(gamePath), score_(score) {
 }
 

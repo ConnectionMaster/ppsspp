@@ -15,22 +15,22 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
-#include "Instance.h"
+#include "ppsspp_config.h"
+#include "Core/Instance.h"
 
-#if !PPSSPP_PLATFORM(WINDOWS) && !PPSSPP_PLATFORM(ANDROID) && !defined(__LIBRETRO__)
+#if !PPSSPP_PLATFORM(WINDOWS) && !PPSSPP_PLATFORM(ANDROID) && !defined(__LIBRETRO__) && !PPSSPP_PLATFORM(SWITCH)
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <fcntl.h>
 #endif
 
-#include "Common/Log.h"
-
 #if PPSSPP_PLATFORM(WINDOWS)
-
 #include "Common/CommonWindows.h"
-
 #endif
+
+#include "Common/Log.h"
+#include "Common/SysError.h"
 
 #include <cstdint>
 
@@ -64,7 +64,8 @@ static bool UpdateInstanceCounter(void (*callback)(volatile InstanceInfo *)) {
 		sizeof(InstanceInfo));
 
 	if (!buf) {
-		ERROR_LOG(SCENET, "Could not map view of file %s (%d).", ID_SHM_NAME, GetLastError());
+		auto err = GetLastError();
+		ERROR_LOG(SCENET, "Could not map view of file %s, %08x %s", ID_SHM_NAME, (uint32_t)err, GetStringErrorMsg(err).c_str());
 		return false;
 	}
 
@@ -79,7 +80,7 @@ static bool UpdateInstanceCounter(void (*callback)(volatile InstanceInfo *)) {
 	UnmapViewOfFile(buf);
 
 	return result;
-#elif PPSSPP_PLATFORM(ANDROID) || defined(__LIBRETRO__)
+#elif PPSSPP_PLATFORM(ANDROID) || defined(__LIBRETRO__) || PPSSPP_PLATFORM(SWITCH)
 	// TODO: replace shm_open & shm_unlink with ashmem or android-shmem
 	return false;
 #else
@@ -136,11 +137,11 @@ void InitInstanceCounter() {
 
 	DWORD lasterr = GetLastError();
 	if (!hIDMapFile) {
-		ERROR_LOG(SCENET, "Could not create %s file mapping object (%d).", ID_SHM_NAME, lasterr);
+		ERROR_LOG(SCENET, "Could not create %s file mapping object, %08x %s", ID_SHM_NAME, (uint32_t)lasterr, GetStringErrorMsg(lasterr).c_str());
 		PPSSPP_ID = 1;
 		return;
 	}
-#elif PPSSPP_PLATFORM(ANDROID) || defined(__LIBRETRO__)
+#elif PPSSPP_PLATFORM(ANDROID) || defined(__LIBRETRO__) || PPSSPP_PLATFORM(SWITCH)
 	// TODO : replace shm_open & shm_unlink with ashmem or android-shmem
 #else
 	// Create shared memory object
@@ -177,7 +178,7 @@ void ShutdownInstanceCounter() {
 		CloseHandle(mapLock);
 		mapLock = nullptr;
 	}
-#elif PPSSPP_PLATFORM(ANDROID) || defined(__LIBRETRO__)
+#elif PPSSPP_PLATFORM(ANDROID) || defined(__LIBRETRO__) || PPSSPP_PLATFORM(SWITCH)
 	// Do nothing
 #else
 	if (hIDMapFile >= 0) {

@@ -21,9 +21,11 @@
 #include <png.h>
 #include "ext/jpge/jpge.h"
 
-#include "Common/ColorConv.h"
+#include "Common/Data/Convert/ColorConv.h"
 #include "Common/File/FileUtil.h"
+#include "Common/File/Path.h"
 #include "Common/Log.h"
+#include "Common/System/Display.h"
 #include "Core/Config.h"
 #include "Core/Screenshot.h"
 #include "Core/Core.h"
@@ -36,7 +38,7 @@
 class JPEGFileStream : public jpge::output_stream
 {
 public:
-	JPEGFileStream(const char *filename) {
+	JPEGFileStream(const Path &filename) {
 		fp_ = File::OpenCFile(filename, "wb");
 	}
 	~JPEGFileStream() override {
@@ -64,7 +66,7 @@ private:
 	FILE *fp_;
 };
 
-static bool WriteScreenshotToJPEG(const char *filename, int width, int height, int num_channels, const uint8_t *image_data, const jpge::params &comp_params) {
+static bool WriteScreenshotToJPEG(const Path &filename, int width, int height, int num_channels, const uint8_t *image_data, const jpge::params &comp_params) {
 	JPEGFileStream dst_stream(filename);
 	if (!dst_stream.Valid()) {
 		ERROR_LOG(IO, "Unable to open screenshot file for writing.");
@@ -96,7 +98,7 @@ static bool WriteScreenshotToJPEG(const char *filename, int width, int height, i
 	return dst_stream.Valid();
 }
 
-static bool WriteScreenshotToPNG(png_imagep image, const char *filename, int convert_to_8bit, const void *buffer, png_int_32 row_stride, const void *colormap) {
+static bool WriteScreenshotToPNG(png_imagep image, const Path &filename, int convert_to_8bit, const void *buffer, png_int_32 row_stride, const void *colormap) {
 	FILE *fp = File::OpenCFile(filename, "wb");
 	if (!fp) {
 		ERROR_LOG(IO, "Unable to open screenshot file for writing.");
@@ -109,7 +111,8 @@ static bool WriteScreenshotToPNG(png_imagep image, const char *filename, int con
 	} else {
 		ERROR_LOG(IO, "Screenshot PNG encode failed.");
 		fclose(fp);
-		remove(filename);
+		// Should we even do this?
+		File::Delete(filename);
 		return false;
 	}
 }
@@ -295,7 +298,37 @@ const u8 *ConvertBufferToScreenshot(const GPUDebugBuffer &buf, bool alpha, u8 *&
 	return temp ? temp : buffer;
 }
 
-bool TakeGameScreenshot(const char *filename, ScreenshotFormat fmt, ScreenshotType type, int *width, int *height, int maxRes) {
+static GPUDebugBuffer ApplyRotation(const GPUDebugBuffer &buf, DisplayRotation rotation) {
+	GPUDebugBuffer rotated;
+
+	// This is a simple but not terribly efficient rotation.
+	if (rotation == DisplayRotation::ROTATE_90) {
+		rotated.Allocate(buf.GetHeight(), buf.GetStride(), buf.GetFormat(), false);
+		for (u32 y = 0; y < buf.GetStride(); ++y) {
+			for (u32 x = 0; x < buf.GetHeight(); ++x) {
+				rotated.SetRawPixel(x, y, buf.GetRawPixel(buf.GetStride() - y - 1, x));
+			}
+		}
+	} else if (rotation == DisplayRotation::ROTATE_180) {
+		rotated.Allocate(buf.GetStride(), buf.GetHeight(), buf.GetFormat(), false);
+		for (u32 y = 0; y < buf.GetHeight(); ++y) {
+			for (u32 x = 0; x < buf.GetStride(); ++x) {
+				rotated.SetRawPixel(x, y, buf.GetRawPixel(buf.GetStride() - x - 1, buf.GetHeight() - y - 1));
+			}
+		}
+	} else {
+		rotated.Allocate(buf.GetHeight(), buf.GetStride(), buf.GetFormat(), false);
+		for (u32 y = 0; y < buf.GetStride(); ++y) {
+			for (u32 x = 0; x < buf.GetHeight(); ++x) {
+				rotated.SetRawPixel(x, y, buf.GetRawPixel(y, buf.GetHeight() - x - 1));
+			}
+		}
+	}
+
+	return rotated;
+}
+
+bool TakeGameScreenshot(const Path &filename, ScreenshotFormat fmt, ScreenshotType type, int *width, int *height, int maxRes) {
 	if (!gpuDebug) {
 		ERROR_LOG(SYSTEM, "Can't take screenshots when GPU not running");
 		return false;
@@ -311,6 +344,12 @@ bool TakeGameScreenshot(const char *filename, ScreenshotFormat fmt, ScreenshotTy
 		// Only crop to the top left when using a render screenshot.
 		w = maxRes > 0 ? 480 * maxRes : PSP_CoreParameter().renderWidth;
 		h = maxRes > 0 ? 272 * maxRes : PSP_CoreParameter().renderHeight;
+	} else if (g_display_rotation != DisplayRotation::ROTATE_0) {
+		GPUDebugBuffer temp;
+		success = gpuDebug->GetOutputFramebuffer(temp);
+		if (success) {
+			buf = ApplyRotation(temp, g_display_rotation);
+		}
 	} else {
 		success = gpuDebug->GetOutputFramebuffer(buf);
 	}
@@ -341,7 +380,7 @@ bool TakeGameScreenshot(const char *filename, ScreenshotFormat fmt, ScreenshotTy
 	return success;
 }
 
-bool Save888RGBScreenshot(const char *filename, ScreenshotFormat fmt, const u8 *bufferRGB888, int w, int h) {
+bool Save888RGBScreenshot(const Path &filename, ScreenshotFormat fmt, const u8 *bufferRGB888, int w, int h) {
 	if (fmt == ScreenshotFormat::PNG) {
 		png_image png;
 		memset(&png, 0, sizeof(png));
@@ -366,7 +405,7 @@ bool Save888RGBScreenshot(const char *filename, ScreenshotFormat fmt, const u8 *
 	}
 }
 
-bool Save8888RGBAScreenshot(const char *filename, const u8 *buffer, int w, int h) {
+bool Save8888RGBAScreenshot(const Path &filename, const u8 *buffer, int w, int h) {
 	png_image png;
 	memset(&png, 0, sizeof(png));
 	png.version = PNG_IMAGE_VERSION;

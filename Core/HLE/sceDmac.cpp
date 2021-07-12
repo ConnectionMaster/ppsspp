@@ -50,7 +50,9 @@ static int __DmacMemcpy(u32 dst, u32 src, u32 size) {
 		skip = gpu->PerformMemoryCopy(dst, src, size);
 	}
 	if (!skip) {
-		Memory::Memcpy(dst, Memory::GetPointer(src), size);
+		currentMIPS->InvalidateICache(src, size);
+		const std::string tag = "DmacMemcpy/" + GetMemWriteTagAt(src, size);
+		Memory::Memcpy(dst, src, size, tag.c_str(), tag.size());
 		currentMIPS->InvalidateICache(dst, size);
 	}
 

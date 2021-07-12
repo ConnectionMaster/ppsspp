@@ -15,6 +15,7 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
 #include <deque>
 #include <thread>
 #include <mutex>
@@ -59,9 +60,6 @@ namespace Reporting
 	static u32 spamProtectionCount = 0;
 	// Temporarily stores a reference to the hostname.
 	static std::string lastHostname;
-	// Keeps track of report-only-once identifiers.  Since they're always constants, a pointer is okay.
-	static std::map<const char *, int> logNTimes;
-	static std::mutex logNTimesLock;
 
 	// Keeps track of whether a harmful setting was ever used.
 	static bool everUnsupported = false;
@@ -100,12 +98,14 @@ namespace Reporting
 
 	static std::mutex crcLock;
 	static std::condition_variable crcCond;
-	static std::string crcFilename;
-	static std::map<std::string, u32> crcResults;
+	static Path crcFilename;
+	static std::map<Path, u32> crcResults;
+	static volatile bool crcPending = false;
+	static volatile bool crcCancel = false;
 	static std::thread crcThread;
 
 	static int CalculateCRCThread() {
-		setCurrentThreadName("ReportCRC");
+		SetCurrentThreadName("ReportCRC");
 
 		// TODO: Use the blockDevice from pspFileSystem?
 		FileLoader *fileLoader = ConstructFileLoader(crcFilename);
@@ -113,7 +113,7 @@ namespace Reporting
 
 		u32 crc = 0;
 		if (blockDevice) {
-			crc = blockDevice->CalculateCRC();
+			crc = blockDevice->CalculateCRC(&crcCancel);
 		}
 
 		delete blockDevice;
@@ -121,15 +121,14 @@ namespace Reporting
 
 		std::lock_guard<std::mutex> guard(crcLock);
 		crcResults[crcFilename] = crc;
+		crcPending = false;
 		crcCond.notify_one();
-
 		return 0;
 	}
 
-	void QueueCRC() {
+	void QueueCRC(const Path &gamePath) {
 		std::lock_guard<std::mutex> guard(crcLock);
 
-		const std::string &gamePath = PSP_CoreParameter().fileToStart;
 		auto it = crcResults.find(gamePath);
 		if (it != crcResults.end()) {
 			// Nothing to do, we've already calculated it.
@@ -137,18 +136,24 @@ namespace Reporting
 			return;
 		}
 
-		if (crcFilename == gamePath) {
+		if (crcPending) {
 			// Already in process.
 			return;
 		}
 
 		crcFilename = gamePath;
+		crcPending = true;
+		crcCancel = false;
 		crcThread = std::thread(CalculateCRCThread);
 	}
 
-	u32 RetrieveCRC() {
-		const std::string &gamePath = PSP_CoreParameter().fileToStart;
-		QueueCRC();
+	bool HasCRC(const Path &gamePath) {
+		std::lock_guard<std::mutex> guard(crcLock);
+		return crcResults.find(gamePath) != crcResults.end();
+	}
+
+	uint32_t RetrieveCRC(const Path &gamePath) {
+		QueueCRC(gamePath);
 
 		std::unique_lock<std::mutex> guard(crcLock);
 		auto it = crcResults.find(gamePath);
@@ -160,6 +165,26 @@ namespace Reporting
 		if (crcThread.joinable())
 			crcThread.join();
 		return it->second;
+	}
+
+	static uint32_t RetrieveCRCUnlessPowerSaving(const Path &gamePath) {
+		// It's okay to use it if we have it already.
+		if (Core_GetPowerSaving() && !HasCRC(gamePath)) {
+			return 0;
+		}
+
+		return RetrieveCRC(gamePath);
+	}
+
+	static void PurgeCRC() {
+		std::unique_lock<std::mutex> guard(crcLock);
+		crcCancel = true;
+		while (crcPending) {
+			crcCond.wait(guard);
+		}
+
+		if (crcThread.joinable())
+			crcThread.join();
 	}
 
 	// Returns the full host (e.g. report.ppsspp.org:80.)
@@ -231,11 +256,13 @@ namespace Reporting
 
 	bool SendReportRequest(const char *uri, const std::string &data, const std::string &mimeType, Buffer *output = NULL)
 	{
-		bool result = false;
 		http::Client http;
-		Buffer theVoid;
+		http::RequestProgress progress(&pendingMessagesDone);
+		Buffer theVoid = Buffer::Void();
 
-		if (output == NULL)
+		http.SetUserAgent(StringFromFormat("PPSSPP/%s", PPSSPP_GIT_VERSION));
+
+		if (output == nullptr)
 			output = &theVoid;
 
 		const char *serverHost = ServerHostname();
@@ -244,7 +271,7 @@ namespace Reporting
 
 		if (http.Resolve(serverHost, ServerPort())) {
 			http.Connect();
-			int result = http.POST(uri, data, mimeType, output);
+			int result = http.POST(uri, data, mimeType, output, &progress);
 			http.Disconnect();
 
 			return result >= 200 && result < 300;
@@ -274,7 +301,7 @@ namespace Reporting
 		return "Windows ARM32";
 #elif defined(_WIN32)
 		return "Windows";
-#elif defined(IOS)
+#elif PPSSPP_PLATFORM(IOS)
 		return "iOS";
 #elif defined(__APPLE__)
 		return "Mac";
@@ -301,14 +328,18 @@ namespace Reporting
 #endif
 	}
 
+	bool MessageAllowed();
+	void SendReportMessage(const char *message, const char *formatted);
+
 	void Init()
 	{
 		// New game, clean slate.
 		spamProtectionCount = 0;
-		logNTimes.clear();
+		ResetCounts();
 		everUnsupported = false;
 		currentSupported = IsSupported();
 		pendingMessagesDone = false;
+		Reporting::SetupCallbacks(&MessageAllowed, &SendReportMessage);
 	}
 
 	void Shutdown()
@@ -321,6 +352,7 @@ namespace Reporting
 			compatThread.join();
 		if (messageThread.joinable())
 			messageThread.join();
+		PurgeCRC();
 
 		// Just so it can be enabled in the menu again.
 		Init();
@@ -346,33 +378,10 @@ namespace Reporting
 			everUnsupported = true;
 	}
 
-	bool ShouldLogNTimes(const char *identifier, int count)
-	{
-		// True if it wasn't there already -> so yes, log.
-		std::lock_guard<std::mutex> lock(logNTimesLock);
-		auto iter = logNTimes.find(identifier);
-		if (iter == logNTimes.end()) {
-			logNTimes.insert(std::pair<const char*, int>(identifier, 1));
-			return true;
-		} else {
-			if (iter->second >= count) {
-				return false;
-			} else {
-				iter->second++;
-				return true;
-			}
-		}
-	}
-
-	void ResetCounts() {
-		std::lock_guard<std::mutex> lock(logNTimesLock);
-		logNTimes.clear();
-	}
-
 	std::string CurrentGameID()
 	{
 		// TODO: Maybe ParamSFOData shouldn't include nulls in std::strings?  Don't work to break savedata, though...
-		const std::string disc_id = StripTrailingNull(g_paramSFO.GetValueString("DISC_ID"));
+		const std::string disc_id = StripTrailingNull(g_paramSFO.GetDiscID());
 		const std::string disc_version = StripTrailingNull(g_paramSFO.GetValueString("DISC_VERSION"));
 		return disc_id + "_" + disc_version;
 	}
@@ -418,10 +427,10 @@ namespace Reporting
 		postdata.Add("savestate_used", SaveState::HasLoadedState());
 	}
 
-	void AddScreenshotData(MultipartFormDataEncoder &postdata, std::string filename)
+	void AddScreenshotData(MultipartFormDataEncoder &postdata, const Path &filename)
 	{
 		std::string data;
-		if (!filename.empty() && readFileToString(false, filename.c_str(), data))
+		if (!filename.empty() && File::ReadFileToString(false, filename, data))
 			postdata.Add("screenshot", data, "screenshot.jpg", "image/jpeg");
 
 		const std::string iconFilename = "disc0:/PSP_GAME/ICON0.PNG";
@@ -433,7 +442,7 @@ namespace Reporting
 
 	int Process(int pos)
 	{
-		setCurrentThreadName("Report");
+		SetCurrentThreadName("Report");
 
 		Payload &payload = payloadBuffer[pos];
 		Buffer output;
@@ -468,9 +477,9 @@ namespace Reporting
 			postdata.Add("graphics", StringFromFormat("%d", payload.int1));
 			postdata.Add("speed", StringFromFormat("%d", payload.int2));
 			postdata.Add("gameplay", StringFromFormat("%d", payload.int3));
-			postdata.Add("crc", StringFromFormat("%08x", Core_GetPowerSaving() ? 0 : RetrieveCRC()));
+			postdata.Add("crc", StringFromFormat("%08x", RetrieveCRCUnlessPowerSaving(PSP_CoreParameter().fileToStart)));
 			postdata.Add("suggestions", payload.string1 != "perfect" && payload.string1 != "playable" ? "1" : "0");
-			AddScreenshotData(postdata, payload.string2);
+			AddScreenshotData(postdata, Path(payload.string2));
 			payload.string1.clear();
 			payload.string2.clear();
 
@@ -511,14 +520,19 @@ namespace Reporting
 		// Don't allow builds without version info from git.  They're useless for reporting.
 		if (strcmp(PPSSPP_GIT_VERSION, "unknown") == 0)
 			return false;
+		// Don't report from games without a version ID (i.e. random hashed homebrew IDs.)
+		// The problem is, these aren't useful because the hashes end up different for different people.
+		// TODO: Should really hash the ELF instead of the path, but then that affects savestates/cheats.
+		if (g_paramSFO.GetValueString("DISC_VERSION").empty())
+			return false;
 
 		// Some users run the exe from a zip or something, and don't have fonts.
 		// This breaks things, but let's not report it since it's confusing.
 #if defined(USING_WIN_UI) || defined(APPLE)
-		if (!File::Exists(g_Config.flash0Directory + "/font/jpn0.pgf"))
+		if (!File::Exists(g_Config.flash0Directory / "font/jpn0.pgf"))
 			return false;
 #else
-		FileInfo fo;
+		File::FileInfo fo;
 		if (!VFSGetFileInfo("flash0/font/jpn0.pgf", &fo))
 			return false;
 #endif
@@ -582,7 +596,7 @@ namespace Reporting
 	}
 
 	int ProcessPending() {
-		setCurrentThreadName("Report");
+		SetCurrentThreadName("Report");
 
 		std::unique_lock<std::mutex> guard(pendingMessageLock);
 		while (!pendingMessagesDone) {
@@ -603,41 +617,13 @@ namespace Reporting
 		return 0;
 	}
 
-	void ReportMessage(const char *message, ...)
-	{
+	bool MessageAllowed() {
 		if (!IsEnabled() || CheckSpamLimited())
-			return;
-		int pos = NextFreePos();
-		if (pos == -1)
-			return;
-
-		const int MESSAGE_BUFFER_SIZE = 65536;
-		char temp[MESSAGE_BUFFER_SIZE];
-
-		va_list args;
-		va_start(args, message);
-		vsnprintf(temp, MESSAGE_BUFFER_SIZE - 1, message, args);
-		temp[MESSAGE_BUFFER_SIZE - 1] = '\0';
-		va_end(args);
-
-		Payload &payload = payloadBuffer[pos];
-		payload.type = RequestType::MESSAGE;
-		payload.string1 = message;
-		payload.string2 = temp;
-
-		std::lock_guard<std::mutex> guard(pendingMessageLock);
-		pendingMessages.push_back(pos);
-		pendingMessageCond.notify_one();
-
-		if (!messageThread.joinable()) {
-			messageThread = std::thread(ProcessPending);
-		}
+			return false;
+		return true;
 	}
 
-	void ReportMessageFormatted(const char *message, const char *formatted)
-	{
-		if (!IsEnabled() || CheckSpamLimited())
-			return;
+	void SendReportMessage(const char *message, const char *formatted) {
 		int pos = NextFreePos();
 		if (pos == -1)
 			return;

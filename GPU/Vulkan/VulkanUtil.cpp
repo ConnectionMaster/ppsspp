@@ -20,6 +20,11 @@
 #include "Common/GPU/Vulkan/VulkanContext.h"
 #include "GPU/Vulkan/VulkanUtil.h"
 
+const VkComponentMapping VULKAN_4444_SWIZZLE = { VK_COMPONENT_SWIZZLE_A, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B };
+const VkComponentMapping VULKAN_1555_SWIZZLE = { VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_A };
+const VkComponentMapping VULKAN_565_SWIZZLE = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
+const VkComponentMapping VULKAN_8888_SWIZZLE = { VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY };
+
 Vulkan2D::Vulkan2D(VulkanContext *vulkan) : vulkan_(vulkan) {
 	InitDeviceObjects();
 }
@@ -47,7 +52,6 @@ void Vulkan2D::DestroyDeviceObjects() {
 	}
 	keptPipelines_.clear();
 
-	VkDevice device = vulkan_->GetDevice();
 	if (descriptorSetLayout_ != VK_NULL_HANDLE) {
 		vulkan_->Delete().QueueDeleteDescriptorSetLayout(descriptorSetLayout_);
 	}

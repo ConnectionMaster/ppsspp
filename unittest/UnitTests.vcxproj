@@ -168,7 +168,7 @@
       <PrecompiledHeader>
       </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
-      <PreprocessorDefinitions>_CRTDBG_MAP_ALLOC;USING_WIN_UI;USING_WIN_UI;GLEW_STATIC;_CRT_SECURE_NO_WARNINGS;WIN32;_DEBUG;_ARCH_32=1;_WINDOWS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRTDBG_MAP_ALLOC;USING_WIN_UI;USING_WIN_UI;GLEW_STATIC;_CRT_NONSTDC_NO_DEPRECATE;_CRT_SECURE_NO_WARNINGS;WIN32;_DEBUG;_ARCH_32=1;_WINDOWS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>../ffmpeg/Windows/x86/include;../ext;../common;..;../ext/glew;../ext/zlib</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <MinimalRebuild>false</MinimalRebuild>
@@ -190,7 +190,7 @@
       <PrecompiledHeader>
       </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
-      <PreprocessorDefinitions>_CRTDBG_MAP_ALLOC;USING_WIN_UI;GLEW_STATIC;_CRT_SECURE_NO_WARNINGS;WIN32;_DEBUG;_ARCH_64=1;_WINDOWS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRTDBG_MAP_ALLOC;USING_WIN_UI;GLEW_STATIC;_CRT_NONSTDC_NO_DEPRECATE;_CRT_SECURE_NO_WARNINGS;WIN32;_DEBUG;_ARCH_64=1;_WINDOWS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>../ffmpeg/Windows/x86_64/include;../ext;../common;..;../ext/glew;../ext/zlib</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <MinimalRebuild>false</MinimalRebuild>
@@ -213,7 +213,7 @@
       <PrecompiledHeader>
       </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
-      <PreprocessorDefinitions>_CRTDBG_MAP_ALLOC;USING_WIN_UI;GLEW_STATIC;_CRT_SECURE_NO_WARNINGS;WIN32;_DEBUG;_ARCH_64=1;_WINDOWS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRTDBG_MAP_ALLOC;USING_WIN_UI;GLEW_STATIC;_CRT_NONSTDC_NO_DEPRECATE;_CRT_SECURE_NO_WARNINGS;WIN32;_DEBUG;_ARCH_64=1;_WINDOWS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>../ffmpeg/Windows/aarch64/include;../ext;../common;..;../ext/glew;../ext/zlib</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <MinimalRebuild>false</MinimalRebuild>
@@ -236,7 +236,7 @@
       <PrecompiledHeader>
       </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
-      <PreprocessorDefinitions>_CRTDBG_MAP_ALLOC;USING_WIN_UI;GLEW_STATIC;_CRT_SECURE_NO_WARNINGS;WIN32;_DEBUG;_ARCH_32=1;_WINDOWS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRTDBG_MAP_ALLOC;USING_WIN_UI;GLEW_STATIC;_CRT_NONSTDC_NO_DEPRECATE;_CRT_SECURE_NO_WARNINGS;WIN32;_DEBUG;_ARCH_32=1;_WINDOWS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>../ffmpeg/Windows/arm/include;../ext;../common;..;../ext/glew;../ext/zlib</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <MinimalRebuild>false</MinimalRebuild>
@@ -263,7 +263,7 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>USING_WIN_UI;GLEW_STATIC;_CRT_SECURE_NO_WARNINGS;WIN32;NDEBUG;_ARCH_32=1;_WINDOWS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>USING_WIN_UI;GLEW_STATIC;_CRT_NONSTDC_NO_DEPRECATE;_CRT_SECURE_NO_WARNINGS;WIN32;NDEBUG;_ARCH_32=1;_WINDOWS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>../ffmpeg/Windows/x86/include;../ext;../common;..;../ext/glew;../ext/zlib</AdditionalIncludeDirectories>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <FavorSizeOrSpeed>Size</FavorSizeOrSpeed>
@@ -290,7 +290,7 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>USING_WIN_UI;GLEW_STATIC;_CRT_SECURE_NO_WARNINGS;WIN32;NDEBUG;_ARCH_64=1;_WINDOWS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>USING_WIN_UI;GLEW_STATIC;_CRT_NONSTDC_NO_DEPRECATE;_CRT_SECURE_NO_WARNINGS;WIN32;NDEBUG;_ARCH_64=1;_WINDOWS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>../ffmpeg/Windows/x86_64/include;../ext;../common;..;../ext/glew;../ext/zlib</AdditionalIncludeDirectories>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -319,7 +319,7 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>USING_WIN_UI;GLEW_STATIC;_CRT_SECURE_NO_WARNINGS;WIN32;NDEBUG;_ARCH_64=1;_WINDOWS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>USING_WIN_UI;GLEW_STATIC;_CRT_NONSTDC_NO_DEPRECATE;_CRT_SECURE_NO_WARNINGS;WIN32;NDEBUG;_ARCH_64=1;_WINDOWS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>../ffmpeg/Windows/aarch64/include;../ext;../common;..;../ext/glew;../ext/zlib</AdditionalIncludeDirectories>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -348,7 +348,7 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>USING_WIN_UI;GLEW_STATIC;_CRT_SECURE_NO_WARNINGS;WIN32;NDEBUG;_ARCH_32=1;_WINDOWS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>USING_WIN_UI;GLEW_STATIC;_CRT_NONSTDC_NO_DEPRECATE;_CRT_SECURE_NO_WARNINGS;WIN32;NDEBUG;_ARCH_32=1;_WINDOWS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>../ffmpeg/Windows/arm/include;../ext;../common;..;../ext/glew;../ext/zlib</AdditionalIncludeDirectories>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -383,6 +383,7 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="TestShaderGenerators.cpp" />
+    <ClCompile Include="TestThreadManager.cpp" />
     <ClCompile Include="TestVertexJit.cpp" />
     <ClCompile Include="UnitTest.cpp" />
     <ClCompile Include="TestArmEmitter.cpp">
@@ -408,6 +409,9 @@
     </ProjectReference>
     <ProjectReference Include="..\ext\libkirk\libkirk.vcxproj">
       <Project>{3baae095-e0ab-4b0e-b5df-ce39c8ae31de}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\ext\libzstd.vcxproj">
+      <Project>{8bfd8150-94d5-4bf9-8a50-7bd9929a0850}</Project>
     </ProjectReference>
     <ProjectReference Include="..\ext\zlib\zlib.vcxproj">
       <Project>{f761046e-6c38-4428-a5f1-38391a37bb34}</Project>

@@ -15,6 +15,7 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
 #include <string>
 #include <algorithm>
 #include <map>
@@ -22,6 +23,7 @@
 #include "ext/xxhash.h"
 
 #include "Common/CommonTypes.h"
+#include "Common/Data/Encoding/Utf8.h"
 #include "Core/MemMap.h"
 #include "Core/System.h"
 #include "Core/MIPS/MIPSCodeUtils.h"
@@ -40,10 +42,53 @@ bool isInInterval(u32 start, u32 size, u32 value)
 	return start <= value && value <= (start+size-1);
 }
 
+bool IsLikelyStringAt(uint32_t addr) {
+	uint32_t maxLen = Memory::ValidSize(addr, 128);
+	if (maxLen <= 1)
+		return false;
+	const char *p = Memory::GetCharPointer(addr);
+	// If there's no terminator nearby, let's say no.
+	if (memchr(p, 0, maxLen) == nullptr)
+		return false;
+
+	// Allow tabs and newlines.
+	static constexpr bool validControl[] = {
+		false, false, false, false, false, false, false, false,
+		false, true, true, true, false, true, false, false,
+		false, false, false, false, false, false, false, false,
+		false, false, false, false, false, false, false, false,
+	};
+
+	// Check that there's some bytes before the terminator that look like a string.
+	UTF8 utf(p);
+	if (utf.end())
+		return false;
+
+	char verify[4];
+	while (!utf.end()) {
+		if (utf.invalid())
+			return false;
+
+		int pos = utf.byteIndex();
+		uint32_t c = utf.next();
+		int len = UTF8::encode(verify, c);
+		// Our decoder is a bit lax, so let's verify this is a normal encoding.
+		// This prevents us from trying to output invalid encodings in the debugger.
+		if (memcmp(p + pos, verify, len) != 0 || pos + len != utf.byteIndex())
+			return false;
+
+		if (c < ARRAY_SIZE(validControl) && !validControl[c])
+			return false;
+		if (c > 0x0010FFFF)
+			return false;
+	}
+
+	return true;
+}
 
 static HashType computeHash(u32 address, u32 size)
 {
-#ifdef _M_X64
+#if PPSSPP_ARCH(AMD64)
 	return XXH3_64bits(Memory::GetPointer(address), size);
 #else
 	return XXH3_64bits(Memory::GetPointer(address), size) & 0xFFFFFFFF;
@@ -302,7 +347,6 @@ u32 DisassemblyManager::getNthPreviousAddress(u32 address, int n)
 		{
 			DisassemblyEntry* entry = it->second;
 			int oldLineNum = entry->getLineNum(address,true);
-			int oldNumLines = entry->getNumLines();
 			if (n <= oldLineNum)
 			{
 				return entry->getLineAddress(oldLineNum-n);
@@ -420,7 +464,6 @@ int DisassemblyFunction::getLineNum(u32 address, bool findStart)
 		int last = (int)lineAddresses.size() - 1;
 		for (int i = 0; i < last; i++)
 		{
-			u32 next = lineAddresses[i + 1];
 			if (lineAddresses[i] == address)
 				return i;
 		}

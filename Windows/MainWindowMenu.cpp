@@ -1,3 +1,4 @@
+#include "ppsspp_config.h"
 #include <map>
 #include <string>
 #include <sstream>
@@ -28,7 +29,7 @@
 #include "UI/OnScreenDisplay.h"
 #include "GPU/Common/PostShader.h"
 #include "GPU/Common/FramebufferManagerCommon.h"
-#include "GPU/Common/TextureCacheCommon.h"
+#include "GPU/Common/TextureDecoder.h"
 #include "GPU/Common/TextureScalerCommon.h"
 
 #include "Core/Config.h"
@@ -49,7 +50,6 @@
 #include "Core/Core.h"
 
 extern bool g_TakeScreenshot;
-extern bool g_ShaderNameListChanged;
 
 namespace MainWindow {
 	extern HINSTANCE hInst;
@@ -155,8 +155,15 @@ namespace MainWindow {
 	void UpdateDynamicMenuCheckmarks(HMENU menu) {
 		int item = ID_SHADERS_BASE + 1;
 
-		for (size_t i = 0; i < availableShaders.size(); i++)
-			CheckMenuItem(menu, item++, ((g_Config.vPostShaderNames[0] == availableShaders[i] && (g_Config.vPostShaderNames[0] == "Off" || g_Config.vPostShaderNames[1] == "Off")) ? MF_CHECKED : MF_UNCHECKED));
+		for (size_t i = 0; i < availableShaders.size(); i++) {
+			bool checked = false;
+			if (g_Config.vPostShaderNames.empty() && availableShaders[i] == "Off")
+				checked = true;
+			else if (g_Config.vPostShaderNames.size() == 1 && availableShaders[i] == g_Config.vPostShaderNames[0])
+				checked = true;
+
+			CheckMenuItem(menu, item++, checked ? MF_CHECKED : MF_UNCHECKED);
+		}
 	}
 
 	bool CreateShadersSubmenu(HMENU menu) {
@@ -190,7 +197,9 @@ namespace MainWindow {
 				continue;
 			int checkedStatus = MF_UNCHECKED;
 			availableShaders.push_back(i->section);
-			if (g_Config.vPostShaderNames[0] == i->section && (g_Config.vPostShaderNames[0] == "Off" || g_Config.vPostShaderNames[1] == "Off")) {
+			if (g_Config.vPostShaderNames.empty() && i->section == "Off") {
+				checkedStatus = MF_CHECKED;
+			} else if (g_Config.vPostShaderNames.size() == 1 && g_Config.vPostShaderNames[0] == i->section) {
 				checkedStatus = MF_CHECKED;
 			}
 
@@ -244,9 +253,9 @@ namespace MainWindow {
 
 		// Emulation menu
 		TranslateMenuItem(menu, ID_EMULATION_PAUSE);
-		TranslateMenuItem(menu, ID_EMULATION_STOP, L"\tCtrl+W");
-		TranslateMenuItem(menu, ID_EMULATION_RESET, L"\tCtrl+B");
-		TranslateMenuItem(menu, ID_EMULATION_SWITCH_UMD, L"\tCtrl+U");
+		TranslateMenuItem(menu, ID_EMULATION_STOP, g_Config.bSystemControls ? L"\tCtrl+W" : L"");
+		TranslateMenuItem(menu, ID_EMULATION_RESET, g_Config.bSystemControls ? L"\tCtrl+B" : L"");
+		TranslateMenuItem(menu, ID_EMULATION_SWITCH_UMD, g_Config.bSystemControls ? L"\tCtrl+U" : L"");
 		TranslateMenuItem(menu, ID_EMULATION_ROTATION_MENU);
 		TranslateMenuItem(menu, ID_EMULATION_ROTATION_H);
 		TranslateMenuItem(menu, ID_EMULATION_ROTATION_V);
@@ -254,7 +263,7 @@ namespace MainWindow {
 		TranslateMenuItem(menu, ID_EMULATION_ROTATION_V_R);
 
 		// Debug menu
-		TranslateMenuItem(menu, ID_TOGGLE_BREAK, L"\tF8", "Break");
+		TranslateMenuItem(menu, ID_TOGGLE_BREAK, g_Config.bSystemControls ? L"\tF8" : L"", "Break");
 		TranslateMenuItem(menu, ID_DEBUG_BREAKONLOAD);
 		TranslateMenuItem(menu, ID_DEBUG_IGNOREILLEGALREADS);
 		TranslateMenuItem(menu, ID_DEBUG_LOADMAPFILE);
@@ -262,14 +271,14 @@ namespace MainWindow {
 		TranslateMenuItem(menu, ID_DEBUG_LOADSYMFILE);
 		TranslateMenuItem(menu, ID_DEBUG_SAVESYMFILE);
 		TranslateMenuItem(menu, ID_DEBUG_RESETSYMBOLTABLE);
-		TranslateMenuItem(menu, ID_DEBUG_TAKESCREENSHOT, L"\tF12");
+		TranslateMenuItem(menu, ID_DEBUG_TAKESCREENSHOT, g_Config.bSystemControls ? L"\tF12" : L"");
 		TranslateMenuItem(menu, ID_DEBUG_DUMPNEXTFRAME);
 		TranslateMenuItem(menu, ID_DEBUG_SHOWDEBUGSTATISTICS);
-		TranslateMenuItem(menu, ID_DEBUG_DISASSEMBLY, L"\tCtrl+D");
-		TranslateMenuItem(menu, ID_DEBUG_GEDEBUGGER, L"\tCtrl+G");
+		TranslateMenuItem(menu, ID_DEBUG_DISASSEMBLY, g_Config.bSystemControls ? L"\tCtrl+D" : L"");
+		TranslateMenuItem(menu, ID_DEBUG_GEDEBUGGER, g_Config.bSystemControls ? L"\tCtrl+G" : L"");
 		TranslateMenuItem(menu, ID_DEBUG_EXTRACTFILE);
-		TranslateMenuItem(menu, ID_DEBUG_LOG, L"\tCtrl+L");
-		TranslateMenuItem(menu, ID_DEBUG_MEMORYVIEW, L"\tCtrl+M");
+		TranslateMenuItem(menu, ID_DEBUG_LOG, g_Config.bSystemControls ? L"\tCtrl+L" : L"");
+		TranslateMenuItem(menu, ID_DEBUG_MEMORYVIEW, g_Config.bSystemControls ? L"\tCtrl+M" : L"");
 
 		// Options menu
 		TranslateMenuItem(menu, ID_OPTIONS_LANGUAGE);
@@ -287,10 +296,10 @@ namespace MainWindow {
 		TranslateMenuItem(menu, ID_FILE_DUMPAUDIO);
 
 		// Skip display multipliers x1-x10
-		TranslateMenuItem(menu, ID_OPTIONS_FULLSCREEN, L"\tAlt+Return, F11");
+		TranslateMenuItem(menu, ID_OPTIONS_FULLSCREEN, g_Config.bSystemControls ? L"\tAlt+Return, F11" : L"");
 		TranslateMenuItem(menu, ID_OPTIONS_VSYNC);
 		TranslateMenuItem(menu, ID_OPTIONS_SHADER_MENU);
-		TranslateMenuItem(menu, ID_OPTIONS_SCREEN_MENU, L"\tCtrl+1");
+		TranslateMenuItem(menu, ID_OPTIONS_SCREEN_MENU, g_Config.bSystemControls ? L"\tCtrl+1" : L"");
 		TranslateMenuItem(menu, ID_OPTIONS_SCREENAUTO);
 		// Skip rendering resolution 2x-5x..
 		TranslateMenuItem(menu, ID_OPTIONS_WINDOW_MENU);
@@ -304,7 +313,7 @@ namespace MainWindow {
 		TranslateMenuItem(menu, ID_OPTIONS_RENDERMODE_MENU);
 		TranslateMenuItem(menu, ID_OPTIONS_NONBUFFEREDRENDERING);
 		TranslateMenuItem(menu, ID_OPTIONS_BUFFEREDRENDERING);
-		TranslateMenuItem(menu, ID_OPTIONS_FRAMESKIP_MENU, L"\tF7");
+		TranslateMenuItem(menu, ID_OPTIONS_FRAMESKIP_MENU, g_Config.bSystemControls ? L"\tF7" : L"");
 		TranslateMenuItem(menu, ID_OPTIONS_FRAMESKIP_AUTO);
 		TranslateMenuItem(menu, ID_OPTIONS_FRAMESKIP_0);
 		TranslateMenuItem(menu, ID_OPTIONS_FRAMESKIPTYPE_MENU);
@@ -330,8 +339,8 @@ namespace MainWindow {
 		TranslateMenuItem(menu, ID_OPTIONS_VERTEXCACHE);
 		TranslateMenuItem(menu, ID_OPTIONS_SHOWFPS);
 		TranslateMenuItem(menu, ID_EMULATION_SOUND);
-		TranslateMenuItem(menu, ID_EMULATION_CHEATS, L"\tCtrl+T");
-		TranslateMenuItem(menu, ID_EMULATION_CHAT, L"\tCtrl+C");
+		TranslateMenuItem(menu, ID_EMULATION_CHEATS, g_Config.bSystemControls ? L"\tCtrl+T" : L"");
+		TranslateMenuItem(menu, ID_EMULATION_CHAT, g_Config.bSystemControls ? L"\tCtrl+C" : L"");
 
 		// Help menu: it's translated in CreateHelpMenu.
 		CreateHelpMenu(menu);
@@ -416,9 +425,9 @@ namespace MainWindow {
 			std::wstring src = ConvertUTF8ToWString(filename);
 			std::wstring dest;
 			if (filename.size() >= 5 && (filename.substr(filename.size() - 4) == ".jpg" || filename.substr(filename.size() - 5) == ".jpeg")) {
-				dest = ConvertUTF8ToWString(GetSysDirectory(DIRECTORY_SYSTEM) + "background.jpg");
+				dest = (GetSysDirectory(DIRECTORY_SYSTEM) / "background.jpg").ToWString();
 			} else {
-				dest = ConvertUTF8ToWString(GetSysDirectory(DIRECTORY_SYSTEM) + "background.png");
+				dest = (GetSysDirectory(DIRECTORY_SYSTEM) / "background.png").ToWString();
 			}
 
 			CopyFileW(src.c_str(), dest.c_str(), FALSE);
@@ -441,8 +450,7 @@ namespace MainWindow {
 		}
 
 		if (W32Util::BrowseForFileName(true, GetHWND(), L"Switch UMD", 0, ConvertUTF8ToWString(filter).c_str(), L"*.pbp;*.elf;*.iso;*.cso;", fn)) {
-			fn = ReplaceAll(fn, "\\", "/");
-			__UmdReplace(fn);
+			__UmdReplace(Path(fn));
 		}
 	}
 
@@ -535,15 +543,6 @@ namespace MainWindow {
 		osm.Show(messageStream.str());
 	}
 
-	static void enableCheats(bool cheats) {
-		g_Config.bEnableCheats = cheats;
-	}
-
-	static void setDisplayOptions(int options) {
-		g_Config.iSmallDisplayZoomType = options;
-		NativeMessageReceived("gpu_resized", "");
-	}
-
 	static void RestartApp() {
 		if (IsDebuggerPresent()) {
 			PostMessage(MainWindow::GetHWND(), WM_USER_RESTART_EMUTHREAD, 0, 0);
@@ -559,7 +558,6 @@ namespace MainWindow {
 		auto gr = GetI18NCategory("Graphics");
 
 		int wmId = LOWORD(wParam);
-		int wmEvent = HIWORD(wParam);
 		// Parse the menu selections:
 		switch (wmId) {
 		case ID_FILE_LOAD:
@@ -571,7 +569,7 @@ namespace MainWindow {
 			break;
 
 		case ID_FILE_LOAD_MEMSTICK:
-			BrowseAndBoot(GetSysDirectory(DIRECTORY_GAME));
+			BrowseAndBoot(GetSysDirectory(DIRECTORY_GAME).ToString());
 			break;
 
 		case ID_FILE_OPEN_NEW_INSTANCE:
@@ -579,7 +577,7 @@ namespace MainWindow {
 			break;
 
 		case ID_FILE_MEMSTICK:
-			ShellExecute(NULL, L"open", ConvertUTF8ToWString(g_Config.memStickDirectory).c_str(), 0, 0, SW_SHOW);
+			ShellExecute(NULL, L"open", g_Config.memStickDirectory.ToWString().c_str(), 0, 0, SW_SHOW);
 			break;
 
 		case ID_TOGGLE_BREAK:
@@ -636,6 +634,10 @@ namespace MainWindow {
 			osm.ShowOnOff(gr->T("Cheats"), g_Config.bEnableCheats);
 			break;
 		case ID_EMULATION_CHAT:
+			if (!g_Config.bEnableNetworkChat) {
+				g_Config.bEnableNetworkChat = true;
+				UpdateCommands();
+			}
 			if (GetUIState() == UISTATE_INGAME) {
 				NativeMessageReceived("chat screen", "");
 			}
@@ -643,14 +645,13 @@ namespace MainWindow {
 		case ID_FILE_LOADSTATEFILE:
 			if (W32Util::BrowseForFileName(true, hWnd, L"Load state", 0, L"Save States (*.ppst)\0*.ppst\0All files\0*.*\0\0", L"ppst", fn)) {
 				SetCursor(LoadCursor(0, IDC_WAIT));
-				SaveState::Load(fn, -1, SaveStateActionFinished);
+				SaveState::Load(Path(fn), -1, SaveStateActionFinished);
 			}
 			break;
-
 		case ID_FILE_SAVESTATEFILE:
 			if (W32Util::BrowseForFileName(false, hWnd, L"Save state", 0, L"Save States (*.ppst)\0*.ppst\0All files\0*.*\0\0", L"ppst", fn)) {
 				SetCursor(LoadCursor(0, IDC_WAIT));
-				SaveState::Save(fn, -1, SaveStateActionFinished);
+				SaveState::Save(Path(fn), -1, SaveStateActionFinished);
 			}
 			break;
 
@@ -853,7 +854,7 @@ namespace MainWindow {
 
 		case ID_DEBUG_LOADMAPFILE:
 			if (W32Util::BrowseForFileName(true, hWnd, L"Load .ppmap", 0, L"Maps\0*.ppmap\0All files\0*.*\0\0", L"ppmap", fn)) {
-				g_symbolMap->LoadSymbolMap(fn.c_str());
+				g_symbolMap->LoadSymbolMap(Path(fn));
 
 				if (disasmWindow)
 					disasmWindow->NotifyMapLoaded();
@@ -865,12 +866,12 @@ namespace MainWindow {
 
 		case ID_DEBUG_SAVEMAPFILE:
 			if (W32Util::BrowseForFileName(false, hWnd, L"Save .ppmap", 0, L"Maps\0*.ppmap\0All files\0*.*\0\0", L"ppmap", fn))
-				g_symbolMap->SaveSymbolMap(fn.c_str());
+				g_symbolMap->SaveSymbolMap(Path(fn));
 			break;
 
 		case ID_DEBUG_LOADSYMFILE:
 			if (W32Util::BrowseForFileName(true, hWnd, L"Load .sym", 0, L"Symbols\0*.sym\0All files\0*.*\0\0", L"sym", fn)) {
-				g_symbolMap->LoadNocashSym(fn.c_str());
+				g_symbolMap->LoadNocashSym(Path(fn));
 
 				if (disasmWindow)
 					disasmWindow->NotifyMapLoaded();
@@ -882,7 +883,7 @@ namespace MainWindow {
 
 		case ID_DEBUG_SAVESYMFILE:
 			if (W32Util::BrowseForFileName(false, hWnd, L"Save .sym", 0, L"Symbols\0*.sym\0All files\0*.*\0\0", L"sym", fn))
-				g_symbolMap->SaveNocashSym(fn.c_str());
+				g_symbolMap->SaveNocashSym(Path(fn));
 			break;
 
 		case ID_DEBUG_RESETSYMBOLTABLE:
@@ -937,7 +938,7 @@ namespace MainWindow {
 				size_t len = pspFileSystem.SeekFile(handle, 0, FILEMOVE_END);
 				bool isBlockMode = pspFileSystem.DevType(handle) & PSPDevType::BLOCK;
 
-				FILE *fp = File::OpenCFile(fn, "wb");
+				FILE *fp = File::OpenCFile(Path(fn), "wb");
 				pspFileSystem.SeekFile(handle, 0, FILEMOVE_BEGIN);
 				u8 buffer[4096];
 				size_t bufferSize = isBlockMode ? sizeof(buffer) / 2048 : sizeof(buffer);
@@ -1065,10 +1066,10 @@ namespace MainWindow {
 				g_Config.vPostShaderNames.clear();
 				if (availableShaders[index] != "Off")
 					g_Config.vPostShaderNames.push_back(availableShaders[index]);
-				g_Config.vPostShaderNames.push_back("Off");
-				g_ShaderNameListChanged = true;
 				g_Config.bShaderChainRequires60FPS = PostShaderChainRequires60FPS(GetFullPostShadersChain(g_Config.vPostShaderNames));
+
 				NativeMessageReceived("gpu_resized", "");
+				NativeMessageReceived("postshader_updated", "");
 				break;
 			}
 
@@ -1377,6 +1378,7 @@ namespace MainWindow {
 
 		bool isPaused = Core_IsStepping() && GetUIState() == UISTATE_INGAME;
 		TranslateMenuItem(menu, ID_TOGGLE_BREAK, L"\tF8", isPaused ? "Run" : "Break");
+		TranslateMenuItem(menu, ID_EMULATION_CHAT, L"\tCtrl+C", g_Config.bEnableNetworkChat ? "Open Chat" : "Enable Chat");
 	}
 
 	void UpdateSwitchUMD() {
